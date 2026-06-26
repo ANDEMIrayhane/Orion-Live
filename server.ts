@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import cookieParser from 'cookie-parser';
-import { db } from './src/database';
+import { db, dbConnectionError } from './src/database';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import path from 'path';
@@ -29,6 +29,61 @@ async function startServer() {
   
   app.use(express.json());
   app.use(cookieParser());
+
+  // Database Connection Health Check Middleware - Fail Fast if Neon is not configured/connected
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (dbConnectionError) {
+      console.warn("Blocking request due to database connection error:", dbConnectionError);
+      
+      // If it is an API call, return service unavailable with a clear message
+      if (req.path.startsWith('/api/')) {
+        return res.status(503).json({
+          error: "ERREUR: Base de données Neon non configurée ou inaccessible. Le système ne peut pas fonctionner sans connexion PostgreSQL."
+        });
+      }
+      
+      // If it is a page request, return a beautiful full-screen error
+      return res.status(503).send(`
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Erreur Critique de Configuration - Orion Live</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <style>
+            body { font-family: 'Inter', sans-serif; }
+          </style>
+        </head>
+        <body class="bg-[#0b0f19] text-slate-100 flex items-center justify-center min-h-screen p-6">
+          <div class="max-w-xl w-full bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl space-y-6 text-center">
+            <div class="inline-flex p-4 bg-red-950/40 rounded-full text-red-500 border border-red-500/20">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-8 h-8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            
+            <div class="space-y-2">
+              <h1 class="text-xl font-bold text-white">Base de données Neon non configurée</h1>
+              <p class="text-xs text-red-400 font-semibold leading-relaxed">
+                Le système ne peut pas fonctionner sans connexion PostgreSQL. Aucun mode fallback local n'est autorisé.
+              </p>
+            </div>
+
+            <div class="bg-black/40 border border-slate-800 p-4 rounded-xl text-left text-xs font-mono text-slate-300 break-all overflow-auto max-h-48 whitespace-pre-wrap">${dbConnectionError}</div>
+
+            <div class="text-[11px] text-slate-500 pt-4 border-t border-slate-850">
+              <p>Veuillez configurer votre variable d'environnement <code class="bg-slate-950 text-indigo-400 px-1 py-0.5 rounded">DATABASE_URL</code> dans l'onglet des Paramètres (Settings) d'AI Studio.</p>
+              <p class="mt-2">L'application se reconnectera automatiquement une fois la base configurée.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    next();
+  });
 
   // Helper: auto-update lives based on date limits
   const autoCheckDates = async () => {

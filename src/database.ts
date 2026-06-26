@@ -95,36 +95,39 @@ export interface AuditLog {
 // 1. FAIL-FAST ENVIRONMENT CHECK & PRISMA CLIENT
 // ==========================================
 
+export let dbConnectionError: string | null = null;
+
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {
+  dbConnectionError = "ERREUR: Base de données Neon non configurée. Le système ne peut pas fonctionner sans connexion PostgreSQL.";
   console.error("\n======================================================================\n" +
-                "ERREUR CRITIQUE: Base de données Neon non configurée. Le système ne peut pas fonctionner sans connexion PostgreSQL.\n" +
+                dbConnectionError + "\n" +
                 "Veuillez définir DATABASE_URL dans votre fichier d'environnement.\n" +
                 "======================================================================\n");
-  process.exit(1);
 }
 
 export const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: dbUrl,
+      url: dbUrl || "postgresql://dummy:dummy@localhost:5432/dummy",
     },
   },
 });
 
-// Test Neon database connection and exit immediately if it fails
+// Test Neon database connection and capture errors
 async function verifyDatabaseConnection() {
+  if (dbConnectionError) return;
   try {
     console.log("Prisma: Attempting to connect to Neon PostgreSQL...");
     await prisma.$connect();
     console.log("Prisma: Successfully connected to Neon PostgreSQL!");
   } catch (err) {
+    dbConnectionError = "ERREUR CRITIQUE: Impossible de se connecter à la base de données Neon.\n" +
+                        "Le système est bloqué car aucun mode de secours n'est autorisé.\n" +
+                        "Détails de l'erreur: " + err;
     console.error("\n======================================================================\n" +
-                  "ERREUR CRITIQUE: Impossible de se connecter à la base de données Neon.\n" +
-                  "Le système s'arrête car aucun mode de secours n'est autorisé.\n" +
-                  "Détails de l'erreur: " + err + "\n" +
+                  dbConnectionError + "\n" +
                   "======================================================================\n");
-    process.exit(1);
   }
 }
 
@@ -262,8 +265,15 @@ function cleanPrismaRow(row: any): any {
 class DatabaseManager {
   public isPg = true;
 
+  private checkConnection() {
+    if (dbConnectionError) {
+      throw new Error(dbConnectionError);
+    }
+  }
+
   // Raw Query bypass helper routing directly via PrismaClient raw safe executor
   public async query(sql: string, params: any[] = []): Promise<any[]> {
+    this.checkConnection();
     try {
       const rows: any[] = await prisma.$queryRawUnsafe(sql, ...params);
       return rows.map(cleanPrismaRow);
