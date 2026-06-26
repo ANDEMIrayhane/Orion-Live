@@ -980,7 +980,7 @@ export default function App() {
             <div className="bg-slate-900 border border-slate-850 p-6 rounded-2xl flex items-center justify-between shadow-lg">
               <div className="space-y-1">
                 <span className="text-xs text-slate-400 font-bold">Chiffre d'Affaires</span>
-                <p className="text-2xl font-black text-white">{(analytics?.totalEarnings || 0).toFixed(2)} €</p>
+                <p className="text-2xl font-black text-white">{(analytics?.totalEarnings || 0).toLocaleString('fr-FR')} FCFA</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
                 <Tag className="w-6 h-6" />
@@ -1165,7 +1165,7 @@ export default function App() {
                       <div className="h-40 bg-slate-950 relative">
                         <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
                         <div className="absolute top-3 right-3 bg-slate-900/95 border border-slate-800 text-indigo-400 px-2 py-0.5 rounded text-xs font-bold">
-                          {p.price.toFixed(2)} €
+                          {p.price.toLocaleString('fr-FR')} FCFA
                         </div>
                       </div>
 
@@ -1307,7 +1307,7 @@ export default function App() {
                               }
                             }}
                           />
-                          <span>{p.name} - <strong>{p.price.toFixed(2)} €</strong> ({p.stock} restants)</span>
+                          <span>{p.name} - <strong>{p.price.toLocaleString('fr-FR')} FCFA</strong> ({p.stock} restants)</span>
                         </label>
                       ))}
                     </div>
@@ -1359,13 +1359,13 @@ export default function App() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[11px] text-slate-400 font-bold uppercase">Prix unitaire (€) *</label>
+                    <label className="text-[11px] text-slate-400 font-bold uppercase">Prix unitaire (FCFA) *</label>
                     <input 
                       type="number" 
-                      step="0.01"
+                      step="1"
                       required 
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                      placeholder="ex. 89.00"
+                      placeholder="ex. 5000"
                       value={productFormPrice}
                       onChange={(e) => setProductFormPrice(e.target.value)}
                     />
@@ -1547,7 +1547,7 @@ export default function App() {
             <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between">
               <div className="space-y-1">
                 <span className="text-xs text-slate-400 font-bold">Transaction totale</span>
-                <p className="text-xl font-black text-white">{(adminStats?.totalSales || 0).toFixed(2)} €</p>
+                <p className="text-xl font-black text-white">{(adminStats?.totalSales || 0).toLocaleString('fr-FR')} FCFA</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400">
                 <Tag className="w-5 h-5" />
@@ -1744,7 +1744,7 @@ export default function App() {
                         <div className="space-y-1.5">
                           <div className="flex justify-between items-start">
                             <h4 className="text-sm font-bold text-white">{p.name}</h4>
-                            <span className="text-sm font-bold text-indigo-400 shrink-0">{p.price.toFixed(2)} €</span>
+                            <span className="text-sm font-bold text-indigo-400 shrink-0">{p.price.toLocaleString('fr-FR')} FCFA</span>
                           </div>
                           <p className="text-xs text-slate-400 leading-relaxed">{p.description}</p>
                         </div>
