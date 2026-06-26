@@ -1,0 +1,181 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. User (Admin & Seller Multi-Tenant)
+// ==========================================
+enum UserRole {
+  ADMIN
+  SELLER
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  name         String        @db.VarChar(100)
+  role         UserRole      @default(SELLER)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  
+  lives        LiveSession[]
+  products     Product[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// ==========================================
+// 2. LiveSession Model
+// ==========================================
+enum LiveStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ENDED
+  SOLD_OUT
+}
+
+model LiveSession {
+  id          String        @id @default(uuid()) @db.Uuid
+  title       String        @db.VarChar(150)
+  description String?       @db.Text
+  imageUrl    String?       @map("image_url") @db.Text
+  status      LiveStatus    @default(DRAFT)
+  slug        String        @unique @db.VarChar(100)
+  startDate   DateTime?     @map("start_date") @db.Timestamptz
+  endDate     DateTime?     @map("end_date") @db.Timestamptz
+  userId      String        @map("user_id") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  seller      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products    LiveProduct[]
+  visitors    VisitorSession[]
+  interests   ProductInterest[]
+  reservations Reservation[]
+  auditLogs   AuditLog[]
+
+  @@index([slug])
+  @@index([userId, status])
+  @@map("live_sessions")
+}
+
+// ==========================================
+// 3. Product Model
+// ==========================================
+model Product {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String        @db.VarChar(150)
+  description String?       @db.Text
+  price       Decimal       @db.Decimal(10, 2)
+  stock       Int           @default(0)
+  imageUrl    String?       @map("image_url") @db.Text
+  isActive    Boolean       @default(true) @map("is_active")
+  userId      String        @map("user_id") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  seller      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lives       LiveProduct[]
+  interests   ProductInterest[]
+  reservations Reservation[]
+
+  @@index([userId])
+  @@map("products")
+}
+
+// ==========================================
+// 4. LiveProduct (Many-to-Many Join Table)
+// ==========================================
+model LiveProduct {
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  productId     String      @map("product_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([liveSessionId, productId])
+  @@index([productId])
+  @@map("live_products")
+}
+
+// ==========================================
+// 5. VisitorSession Model (For unique visitors counts)
+// ==========================================
+model VisitorSession {
+  id            String      @id @default(uuid()) @db.Uuid
+  pseudo        String      @db.VarChar(50)
+  whatsapp      String?     @db.VarChar(30)
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  joinedAt      DateTime    @default(now()) @map("joined_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, pseudo])
+  @@map("visitor_sessions")
+}
+
+// ==========================================
+// 6. ProductInterest Model (Likes/Wants)
+// ==========================================
+model ProductInterest {
+  id            String      @id @default(uuid()) @db.Uuid
+  visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
+  productId     String      @map("product_id") @db.Uuid
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, productId])
+  @@map("product_interests")
+}
+
+// ==========================================
+// 7. Reservation Model
+// ==========================================
+model Reservation {
+  id            String      @id @default(uuid()) @db.Uuid
+  visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
+  whatsapp      String?     @db.VarChar(30)
+  productId     String      @map("product_id") @db.Uuid
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  quantity      Int         @default(1)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, productId])
+  @@map("reservations")
+}
+
+// ==========================================
+// 8. AuditLog Model (Seller Real-time Stats)
+// ==========================================
+model AuditLog {
+  id            String      @id @default(uuid()) @db.Uuid
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
+  actionType    String      @map("action_type") @db.VarChar(50) // 'join', 'interest', 'reservation'
+  productName   String?     @map("product_name") @db.VarChar(150)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

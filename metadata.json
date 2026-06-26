@@ -1,0 +1,6 @@
+{
+  "name": "Orion Live",
+  "description": "SaaS MVP pour vendeurs de live commerce (TikTok, Facebook, Instagram Live). Créez des boutiques temporaires pour vos directs, gérez vos stocks et suivez les intentions d'achat en temps réel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
