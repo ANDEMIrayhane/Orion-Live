@@ -603,7 +603,7 @@ async function startServer() {
         return res.status(400).json({ error: "Vous ne pouvez pas modifier votre propre rôle administratif" });
       }
       
-      if (this && typeof this === 'object' && 'isPg' in this && (this as any).isPg) {
+      if (db.isPg) {
         await db.query("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2", [role, id]);
       } else {
         const localData = (db as any).readLocal();
@@ -628,7 +628,7 @@ async function startServer() {
         return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte administrateur." });
       }
 
-      if (this && typeof this === 'object' && 'isPg' in this && (this as any).isPg) {
+      if (db.isPg) {
         await db.query("DELETE FROM users WHERE id = $1", [id]);
       } else {
         const localData = (db as any).readLocal();

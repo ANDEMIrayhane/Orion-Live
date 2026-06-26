@@ -83,7 +83,7 @@ export interface AuditLog {
 
 class DatabaseManager {
   private pool: Pool | null = null;
-  private isPg = false;
+  public isPg = false;
   private localDbPath = path.resolve(process.cwd(), 'orion_db.json');
 
   constructor() {
