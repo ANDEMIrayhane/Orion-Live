@@ -33,17 +33,7 @@ async function startServer() {
   // Helper: auto-update lives based on date limits
   const autoCheckDates = async () => {
     try {
-      const lives = await db.query("SELECT * FROM live_sessions");
-      const now = new Date();
-      for (const live of lives) {
-        if (live.status === 'ACTIVE' || live.status === 'SOLD_OUT') {
-          const endDate = new Date(live.end_date);
-          if (now > endDate) {
-            await db.updateLiveSession(live.id, { status: 'ENDED' });
-            console.log(`Auto-ended live session ${live.id} because end_date passed.`);
-          }
-        }
-      }
+      await db.autoCheckDates();
     } catch (e) {
       console.error("Error auto checking dates:", e);
     }
@@ -444,16 +434,100 @@ async function startServer() {
       const interests = await db.query("SELECT * FROM product_interests WHERE live_session_id = $1", [id]);
       const visitorSessions = await db.query("SELECT * FROM visitor_sessions WHERE live_session_id = $1", [id]);
       const logs = await db.query("SELECT * FROM audit_logs WHERE live_session_id = $1", [id]);
+      const notifications = await db.query("SELECT * FROM live_notifications WHERE live_id = $1", [id]);
+
+      const preRegistrationsCount = notifications.length;
+
+      // Calculate visitors before start
+      const start_date = new Date(live[0].start_date).getTime();
+      const visitorsBeforeStart = visitorSessions.filter((vs: any) => new Date(vs.joined_at).getTime() < start_date);
+      const visitorsBeforeStartCount = visitorsBeforeStart.length;
+
+      const preRegistrationConversionRate = visitorsBeforeStartCount > 0 
+        ? Math.round((preRegistrationsCount / visitorsBeforeStartCount) * 100) 
+        : 0;
 
       return res.json({
         live: live[0],
         reservationsCount: reservations.length,
         interestsCount: interests.length,
         uniqueVisitorsCount: visitorSessions.length,
+        preRegistrationsCount,
+        visitorsBeforeStartCount,
+        preRegistrationConversionRate,
         logs
       });
     } catch (e) {
       return res.status(500).json({ error: "Erreur analytiques" });
+    }
+  });
+
+  // Reactivate finished live session
+  app.post('/api/lives/:id/reactivate', requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { start_date, end_date } = req.body;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: "Date de début et de fin sont obligatoires." });
+    }
+
+    const start = new Date(start_date).getTime();
+    const end = new Date(end_date).getTime();
+    const durationMs = end - start;
+    if (durationMs > 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: "La durée maximale d'une session live est limitée à 24 heures." });
+    }
+    if (durationMs <= 0) {
+      return res.status(400).json({ error: "La date de fin doit être postérieure à la date de début." });
+    }
+
+    try {
+      const existing = await db.query("SELECT * FROM live_sessions WHERE id = $1", [id]);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: "Session live non trouvée." });
+      }
+
+      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+        return res.status(403).json({ error: "Action non autorisée" });
+      }
+
+      const live = existing[0];
+      if (live.status !== 'ENDED' && live.status !== 'ARCHIVED') {
+        return res.status(400).json({ error: "Seuls les lives terminés peuvent être réactivés." });
+      }
+
+      // Rename the old session's slug to free up the original slug
+      const originalSlug = live.slug;
+      const archivedSlug = `${originalSlug}-hist-${Math.random().toString(36).substr(2, 5)}`;
+
+      // Update old session
+      await db.updateLiveSession(live.id, { 
+        slug: archivedSlug,
+        status: 'ARCHIVED'
+      });
+
+      // Create new live session with original slug
+      const newLive = await db.createLiveSession({
+        title: live.title,
+        description: live.description,
+        image_url: live.image_url,
+        status: 'SCHEDULED',
+        slug: originalSlug,
+        start_date,
+        end_date,
+        user_id: live.user_id
+      });
+
+      // Fetch linked products from the old session
+      const oldProducts = await db.query("SELECT product_id FROM live_products WHERE live_session_id = $1", [live.id]);
+      const productIds = oldProducts.map((p: any) => p.product_id);
+      if (productIds.length > 0) {
+        await db.syncLiveProducts(newLive.id, productIds);
+      }
+
+      return res.status(201).json(newLive);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || "Erreur lors de la réactivation du live." });
     }
   });
 
@@ -478,23 +552,33 @@ async function startServer() {
         WHERE lp.live_session_id = $1 AND p.is_active = true
       `, [live.id]);
 
-      // Recheck/Update sold out status if it changed
-      const allSoldOut = products.length > 0 && products.every((p: any) => p.stock <= 0);
-      if (allSoldOut && live.status === 'ACTIVE') {
-        live.status = 'SOLD_OUT';
-        await db.updateLiveSession(live.id, { status: 'SOLD_OUT' });
-      } else if (!allSoldOut && live.status === 'SOLD_OUT') {
-        live.status = 'ACTIVE';
-        await db.updateLiveSession(live.id, { status: 'ACTIVE' });
+      // Recheck/Update sold out status if it changed (only for ACTIVE/SOLD_OUT status)
+      if (live.status === 'ACTIVE' || live.status === 'SOLD_OUT') {
+        const allSoldOut = products.length > 0 && products.every((p: any) => p.stock <= 0);
+        if (allSoldOut && live.status === 'ACTIVE') {
+          live.status = 'SOLD_OUT';
+          await db.updateLiveSession(live.id, { status: 'SOLD_OUT' });
+        } else if (!allSoldOut && live.status === 'SOLD_OUT') {
+          live.status = 'ACTIVE';
+          await db.updateLiveSession(live.id, { status: 'ACTIVE' });
+        }
       }
 
       // Grab dynamic activities/logs for live comments simulation
       const logs = await db.query("SELECT * FROM audit_logs WHERE live_session_id = $1 ORDER BY created_at DESC LIMIT 50", [live.id]);
 
+      // Grab pre-registration details if scheduled
+      let preRegistrationsCount = 0;
+      if (live.status === 'SCHEDULED') {
+        const notifs = await db.query("SELECT * FROM live_notifications WHERE live_id = $1", [live.id]);
+        preRegistrationsCount = notifs.length;
+      }
+
       return res.json({
         live,
         products,
-        logs
+        logs,
+        preRegistrationsCount
       });
     } catch (e) {
       return res.status(500).json({ error: "Erreur d'accès à la boutique de vente." });
@@ -516,6 +600,53 @@ async function startServer() {
       return res.json({ success: true, message: "Connexion au live enregistrée !" });
     } catch (e) {
       return res.status(500).json({ error: "Erreur de connexion" });
+    }
+  });
+
+  // Pre-registration notification sign-up for SCHEDULED lives
+  app.post('/api/lives/public/:slug/notify', async (req: Request, res: Response) => {
+    const { slug } = req.params;
+    const { pseudo, whatsapp } = req.body;
+    if (!pseudo) return res.status(400).json({ error: "Un pseudo est requis." });
+
+    try {
+      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
+      if (lives.length === 0) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
+
+      const live = lives[0];
+      if (live.status !== 'SCHEDULED') {
+        return res.status(400).json({ error: "Les inscriptions ne sont autorisées que pour les sessions programmées." });
+      }
+
+      await db.createLiveNotification({
+        live_id: live.id,
+        pseudo,
+        whatsapp: whatsapp || ''
+      });
+
+      // Add audit log for notification registration
+      const logId = `log-${Math.random().toString(36).substr(2, 9)}`;
+      if (db.isPg) {
+        await db.query(`
+          INSERT INTO audit_logs (id, live_session_id, visitor_pseudo, action_type, details)
+          VALUES ($1, $2, $3, 'pre-register', $4)
+        `, [logId, live.id, pseudo, `S'est pré-inscrit(e) pour recevoir une alerte au lancement du live.`]);
+      } else {
+        const localData = (db as any).readLocal();
+        localData.audit_logs.push({
+          id: logId,
+          live_session_id: live.id,
+          visitor_pseudo: pseudo,
+          action_type: 'pre-register',
+          details: `S'est pré-inscrit(e) pour recevoir une alerte au lancement du live.`,
+          created_at: new Date().toISOString()
+        });
+        (db as any).writeLocal(localData);
+      }
+
+      return res.json({ success: true, message: "Pré-inscription validée !" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || "Erreur d'inscription" });
     }
   });
 

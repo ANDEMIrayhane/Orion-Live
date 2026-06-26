@@ -1,6 +1,8 @@
-import { Pool } from 'pg';
-import * as fs from 'fs';
-import * as path from 'path';
+import { PrismaClient } from '@prisma/client';
+
+// ==========================================
+// DB TYPES & INTERFACES (BACKWARD COMPATIBLE)
+// ==========================================
 
 export interface User {
   id: string;
@@ -17,13 +19,21 @@ export interface LiveSession {
   title: string;
   description: string;
   image_url: string;
-  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | 'ENDED' | 'SOLD_OUT';
+  status: 'DRAFT' | 'SCHEDULED' | 'ACTIVE' | 'SOLD_OUT' | 'ENDED' | 'ARCHIVED' | 'INACTIVE';
   slug: string;
   start_date: string;
   end_date: string;
   user_id: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface LiveNotification {
+  id: string;
+  live_id: string;
+  pseudo: string;
+  whatsapp?: string;
+  created_at: string;
 }
 
 export interface Product {
@@ -81,304 +91,185 @@ export interface AuditLog {
   created_at: string;
 }
 
+// ==========================================
+// 1. FAIL-FAST ENVIRONMENT CHECK & PRISMA CLIENT
+// ==========================================
+
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+  console.error("\n======================================================================\n" +
+                "ERREUR CRITIQUE: Base de données Neon non configurée. Le système ne peut pas fonctionner sans connexion PostgreSQL.\n" +
+                "Veuillez définir DATABASE_URL dans votre fichier d'environnement.\n" +
+                "======================================================================\n");
+  process.exit(1);
+}
+
+export const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: dbUrl,
+    },
+  },
+});
+
+// Test Neon database connection and exit immediately if it fails
+async function verifyDatabaseConnection() {
+  try {
+    console.log("Prisma: Attempting to connect to Neon PostgreSQL...");
+    await prisma.$connect();
+    console.log("Prisma: Successfully connected to Neon PostgreSQL!");
+  } catch (err) {
+    console.error("\n======================================================================\n" +
+                  "ERREUR CRITIQUE: Impossible de se connecter à la base de données Neon.\n" +
+                  "Le système s'arrête car aucun mode de secours n'est autorisé.\n" +
+                  "Détails de l'erreur: " + err + "\n" +
+                  "======================================================================\n");
+    process.exit(1);
+  }
+}
+
+verifyDatabaseConnection();
+
+// ==========================================
+// 2. PRISMA TYPE MAPPER HELPERS (CAMEL to SNAKE)
+// ==========================================
+
+function mapUserToSnake(u: any): User {
+  if (!u) return u;
+  return {
+    id: u.id,
+    email: u.email,
+    password_hash: u.passwordHash,
+    name: u.name,
+    role: u.role,
+    created_at: u.createdAt instanceof Date ? u.createdAt.toISOString() : u.createdAt,
+    updated_at: u.updatedAt instanceof Date ? u.updatedAt.toISOString() : u.updatedAt,
+  };
+}
+
+function mapLiveSessionToSnake(l: any): LiveSession {
+  if (!l) return l;
+  return {
+    id: l.id,
+    title: l.title,
+    description: l.description,
+    image_url: l.imageUrl,
+    status: l.status,
+    slug: l.slug,
+    start_date: l.startDate instanceof Date ? l.startDate.toISOString() : l.startDate,
+    end_date: l.endDate instanceof Date ? l.endDate.toISOString() : l.endDate,
+    user_id: l.userId,
+    created_at: l.createdAt instanceof Date ? l.createdAt.toISOString() : l.createdAt,
+    updated_at: l.updatedAt instanceof Date ? l.updatedAt.toISOString() : l.updatedAt,
+  };
+}
+
+function mapProductToSnake(p: any): Product {
+  if (!p) return p;
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    price: typeof p.price === 'object' && p.price !== null ? Number(p.price.toString()) : Number(p.price),
+    stock: p.stock,
+    image_url: p.imageUrl,
+    is_active: p.isActive,
+    user_id: p.userId,
+    created_at: p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
+    updated_at: p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt,
+  };
+}
+
+function mapReservationToSnake(r: any): Reservation {
+  if (!r) return r;
+  return {
+    id: r.id,
+    visitor_pseudo: r.visitorPseudo,
+    whatsapp: r.whatsapp,
+    product_id: r.productId,
+    live_session_id: r.liveSessionId,
+    quantity: r.quantity,
+    created_at: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+  };
+}
+
+function mapProductInterestToSnake(i: any): ProductInterest {
+  if (!i) return i;
+  return {
+    id: i.id,
+    visitor_pseudo: i.visitorPseudo,
+    product_id: i.productId,
+    live_session_id: i.liveSessionId,
+    created_at: i.createdAt instanceof Date ? i.createdAt.toISOString() : i.createdAt,
+  };
+}
+
+function mapVisitorSessionToSnake(s: any): VisitorSession {
+  if (!s) return s;
+  return {
+    id: s.id,
+    pseudo: s.pseudo,
+    whatsapp: s.whatsapp,
+    live_session_id: s.liveSessionId,
+    joined_at: s.joinedAt instanceof Date ? s.joinedAt.toISOString() : s.joinedAt,
+  };
+}
+
+function mapAuditLogToSnake(a: any): AuditLog {
+  if (!a) return a;
+  return {
+    id: a.id,
+    live_session_id: a.liveSessionId,
+    visitor_pseudo: a.visitorPseudo,
+    action_type: a.actionType,
+    product_name: a.productName,
+    details: a.details,
+    created_at: a.createdAt instanceof Date ? a.createdAt.toISOString() : a.createdAt,
+  };
+}
+
+function mapLiveNotificationToSnake(n: any): LiveNotification {
+  if (!n) return n;
+  return {
+    id: n.id,
+    live_id: n.liveId,
+    pseudo: n.pseudo,
+    whatsapp: n.whatsapp,
+    created_at: n.createdAt instanceof Date ? n.createdAt.toISOString() : n.createdAt,
+  };
+}
+
+// Cleans raw query decimals and bigints
+function cleanPrismaRow(row: any): any {
+  if (!row) return row;
+  const clean: any = {};
+  for (const key of Object.keys(row)) {
+    let val = row[key];
+    if (val !== null && typeof val === 'object' && val.constructor && val.constructor.name === 'Decimal') {
+      val = Number(val.toString());
+    } else if (typeof val === 'bigint') {
+      val = Number(val);
+    }
+    clean[key] = val;
+  }
+  return clean;
+}
+
+// ==========================================
+// 3. DATABASE MANAGER CLASS (SaaS - 100% PRISMA)
+// ==========================================
+
 class DatabaseManager {
-  private pool: Pool | null = null;
-  public isPg = false;
-  private localDbPath = path.resolve(process.cwd(), 'orion_db.json');
+  public isPg = true;
 
-  constructor() {
-    const dbUrl = process.env.DATABASE_URL;
-    if (dbUrl) {
-      try {
-        this.pool = new Pool({
-          connectionString: dbUrl,
-          ssl: dbUrl.includes('neon.tech') ? { rejectUnauthorized: false } : undefined,
-        });
-        this.isPg = true;
-        console.log('Orion DB: Connected to PostgreSQL (Neon).');
-      } catch (err) {
-        console.error('Orion DB: Error connecting to PostgreSQL. Falling back to local store.', err);
-        this.isPg = false;
-      }
-    } else {
-      console.log('Orion DB: DATABASE_URL not set. Using workspace-persistent local JSON store.');
-      this.isPg = false;
-    }
-    this.initDatabase();
-  }
-
-  private initDatabase() {
-    if (this.isPg && this.pool) {
-      // Create tables on Neon PostgreSQL if they don't exist
-      const query = `
-        CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-        CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            email VARCHAR(255) UNIQUE NOT NULL,
-            password_hash VARCHAR(255) NOT NULL,
-            name VARCHAR(100) NOT NULL,
-            role VARCHAR(20) DEFAULT 'SELLER' NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS live_sessions (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            title VARCHAR(150) NOT NULL,
-            description TEXT,
-            image_url TEXT,
-            status VARCHAR(20) DEFAULT 'DRAFT' NOT NULL,
-            slug VARCHAR(100) UNIQUE NOT NULL,
-            start_date TIMESTAMP WITH TIME ZONE,
-            end_date TIMESTAMP WITH TIME ZONE,
-            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS products (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            name VARCHAR(150) NOT NULL,
-            description TEXT,
-            price NUMERIC(10, 2) NOT NULL,
-            stock INTEGER NOT NULL DEFAULT 0,
-            image_url TEXT,
-            is_active BOOLEAN DEFAULT true NOT NULL,
-            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS live_products (
-            live_session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
-            product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            PRIMARY KEY (live_session_id, product_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS visitor_sessions (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            pseudo VARCHAR(50) NOT NULL,
-            whatsapp VARCHAR(30),
-            live_session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
-            joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS product_interests (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            visitor_pseudo VARCHAR(50) NOT NULL,
-            product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-            live_session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS reservations (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            visitor_pseudo VARCHAR(50) NOT NULL,
-            whatsapp VARCHAR(30),
-            product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-            live_session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
-            quantity INTEGER NOT NULL DEFAULT 1,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            live_session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
-            visitor_pseudo VARCHAR(50) NOT NULL,
-            action_type VARCHAR(50) NOT NULL,
-            product_name VARCHAR(150),
-            details TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-      `;
-      this.pool.query(query)
-        .then(() => console.log('Orion DB: PostgreSQL tables verified/initialized.'))
-        .catch(err => console.error('Orion DB: PostgreSQL table init error', err));
-    } else {
-      // Local JSON File DB initialization with seeds
-      if (!fs.existsSync(this.localDbPath)) {
-        const seedData = {
-          users: [
-            {
-              id: "admin-uuid",
-              email: "admin@orion.live",
-              password_hash: "$2a$10$U7v0.fNlI2v2gC3672.r3OuNfMHeo7v3u6jC8HkZ/fXzK2Kj4qR7K", // "orionadmin"
-              name: "Super Administrateur Orion",
-              role: "ADMIN",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            {
-              id: "seller-1-uuid",
-              email: "sarah.bijoux@orion.live",
-              password_hash: "$2a$10$T1qKbyi1S7ZzE5gV5m6HauGzE6b/v52qMv/8O7I6/mH/S72f3Y6iG", // "orionseller"
-              name: "Sarah Bijoux Artisans",
-              role: "SELLER",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            {
-              id: "seller-2-uuid",
-              email: "jean.vintage@orion.live",
-              password_hash: "$2a$10$T1qKbyi1S7ZzE5gV5m6HauGzE6b/v52qMv/8O7I6/mH/S72f3Y6iG", // "orionseller"
-              name: "Jean Mode Vintage",
-              role: "SELLER",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }
-          ] as User[],
-          live_sessions: [
-            {
-              id: "live-1-uuid",
-              title: "Vente Live Été - Bijoux Fins ☀️",
-              description: "Découvrez notre collection de bijoux éphémères en direct live !",
-              image_url: "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=600&q=80",
-              status: "ACTIVE",
-              slug: "vente-bijoux",
-              start_date: new Date().toISOString(),
-              end_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-              user_id: "seller-1-uuid",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }
-          ] as LiveSession[],
-          products: [
-            {
-              id: "prod-1-uuid",
-              name: "Collier Plaqué Or Solaire",
-              description: "Pièce artisanale ornée d'un soleil martelé.",
-              price: 89.00,
-              stock: 10,
-              image_url: "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=400&q=80",
-              is_active: true,
-              user_id: "seller-1-uuid",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            {
-              id: "prod-2-uuid",
-              name: "Bague Améthyste Impériale",
-              description: "Bague sertie d'une améthyste naturelle brute.",
-              price: 145.00,
-              stock: 3,
-              image_url: "https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=400&q=80",
-              is_active: true,
-              user_id: "seller-1-uuid",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            {
-              id: "prod-3-uuid",
-              name: "Créoles Argent Scintillantes",
-              description: "Boucles d'oreilles créoles facettées.",
-              price: 39.00,
-              stock: 15,
-              image_url: "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=400&q=80",
-              is_active: true,
-              user_id: "seller-1-uuid",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }
-          ] as Product[],
-          live_products: [
-            { live_session_id: "live-1-uuid", product_id: "prod-1-uuid", created_at: new Date().toISOString() },
-            { live_session_id: "live-1-uuid", product_id: "prod-2-uuid", created_at: new Date().toISOString() },
-            { live_session_id: "live-1-uuid", product_id: "prod-3-uuid", created_at: new Date().toISOString() }
-          ] as LiveProduct[],
-          visitor_sessions: [] as VisitorSession[],
-          product_interests: [] as ProductInterest[],
-          reservations: [] as Reservation[],
-          audit_logs: [] as AuditLog[]
-        };
-        fs.writeFileSync(this.localDbPath, JSON.stringify(seedData, null, 2));
-        console.log('Orion DB: Seeded local JSON file database successfully.');
-      }
-    }
-  }
-
-  private readLocal(): any {
-    try {
-      const data = fs.readFileSync(this.localDbPath, 'utf-8');
-      return JSON.parse(data);
-    } catch (e) {
-      return {};
-    }
-  }
-
-  private writeLocal(data: any) {
-    fs.writeFileSync(this.localDbPath, JSON.stringify(data, null, 2));
-  }
-
-  // ==========================================
-  // DB DATA RETRIEVAL METHODS
-  // ==========================================
-
+  // Raw Query bypass helper routing directly via PrismaClient raw safe executor
   public async query(sql: string, params: any[] = []): Promise<any[]> {
-    if (this.isPg && this.pool) {
-      const res = await this.pool.query(sql, params);
-      return res.rows;
-    } else {
-      // Parse local query dynamically using simulated lookups
-      const data = this.readLocal();
-      const lowerSql = sql.toLowerCase().trim();
-
-      if (lowerSql.startsWith('select * from users where email =')) {
-        const email = params[0];
-        return data.users.filter((u: any) => u.email === email);
-      }
-      if (lowerSql.startsWith('select * from users where id =')) {
-        const id = params[0];
-        return data.users.filter((u: any) => u.id === id);
-      }
-      if (lowerSql.startsWith('select * from users')) {
-        return data.users;
-      }
-      if (lowerSql.includes('live_sessions') && lowerSql.includes('slug =')) {
-        const slug = params[0];
-        return data.live_sessions.filter((l: any) => l.slug === slug);
-      }
-      if (lowerSql.includes('select * from live_sessions where user_id =')) {
-        const userId = params[0];
-        return data.live_sessions.filter((l: any) => l.user_id === userId);
-      }
-      if (lowerSql.startsWith('select * from live_sessions')) {
-        return data.live_sessions;
-      }
-      if (lowerSql.includes('select * from products where user_id =')) {
-        const userId = params[0];
-        return data.products.filter((p: any) => p.user_id === userId);
-      }
-      if (lowerSql.includes('select * from products where id =')) {
-        const id = params[0];
-        return data.products.filter((p: any) => p.id === id);
-      }
-      if (lowerSql.startsWith('select * from products')) {
-        return data.products;
-      }
-      if (lowerSql.includes('live_products') && lowerSql.includes('live_session_id =')) {
-        const liveId = params[0];
-        return data.live_products.filter((lp: any) => lp.live_session_id === liveId);
-      }
-      if (lowerSql.includes('select * from reservations')) {
-        if (params.length > 0) {
-          const liveId = params[0];
-          return data.reservations.filter((r: any) => r.live_session_id === liveId);
-        }
-        return data.reservations;
-      }
-      if (lowerSql.includes('select * from audit_logs')) {
-        const liveId = params[0];
-        return data.audit_logs
-          .filter((al: any) => al.live_session_id === liveId)
-          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      }
-      if (lowerSql.includes('select * from product_interests')) {
-        const liveId = params[0];
-        return data.product_interests.filter((pi: any) => pi.live_session_id === liveId);
-      }
-      return [];
+    try {
+      const rows: any[] = await prisma.$queryRawUnsafe(sql, ...params);
+      return rows.map(cleanPrismaRow);
+    } catch (err) {
+      console.error("Prisma query raw error on statement:", sql, err);
+      throw err;
     }
   }
 
@@ -387,427 +278,366 @@ class DatabaseManager {
   // ==========================================
 
   public async insertUser(user: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User> {
-    const id = `user-${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    const newUser: User = {
-      id,
-      ...user,
-      created_at: now,
-      updated_at: now
-    };
-
-    if (this.isPg && this.pool) {
-      const sql = `INSERT INTO users (id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, $5) RETURNING *`;
-      const res = await this.pool.query(sql, [newUser.id, newUser.email, newUser.password_hash, newUser.name, newUser.role]);
-      return res.rows[0];
-    } else {
-      const data = this.readLocal();
-      if (data.users.some((u: any) => u.email === user.email)) {
+    try {
+      const u = await prisma.user.create({
+        data: {
+          email: user.email,
+          passwordHash: user.password_hash,
+          name: user.name,
+          role: user.role === 'ADMIN' ? 'ADMIN' : 'SELLER',
+        }
+      });
+      return mapUserToSnake(u);
+    } catch (err: any) {
+      if (err.code === 'P2002') {
         throw new Error("Cet email est déjà utilisé.");
       }
-      data.users.push(newUser);
-      this.writeLocal(data);
-      return newUser;
+      throw err;
     }
   }
 
   public async createLiveSession(live: Omit<LiveSession, 'id' | 'created_at' | 'updated_at'>): Promise<LiveSession> {
-    const id = `live-${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    const newLive: LiveSession = {
-      id,
-      ...live,
-      created_at: now,
-      updated_at: now
-    };
-
-    if (this.isPg && this.pool) {
-      const sql = `INSERT INTO live_sessions (id, title, description, image_url, status, slug, start_date, end_date, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-      const res = await this.pool.query(sql, [id, live.title, live.description, live.image_url, live.status, live.slug, live.start_date, live.end_date, live.user_id]);
-      return res.rows[0];
-    } else {
-      const data = this.readLocal();
-      if (data.live_sessions.some((l: any) => l.slug === live.slug)) {
+    try {
+      const l = await prisma.liveSession.create({
+        data: {
+          title: live.title,
+          description: live.description,
+          imageUrl: live.image_url,
+          status: live.status,
+          slug: live.slug,
+          startDate: live.start_date ? new Date(live.start_date) : null,
+          endDate: live.end_date ? new Date(live.end_date) : null,
+          userId: live.user_id,
+        }
+      });
+      return mapLiveSessionToSnake(l);
+    } catch (err: any) {
+      if (err.code === 'P2002') {
         throw new Error("Ce slug de boutique est déjà utilisé.");
       }
-      data.live_sessions.push(newLive);
-      this.writeLocal(data);
-      return newLive;
+      throw err;
     }
   }
 
   public async updateLiveSession(id: string, updates: Partial<LiveSession>): Promise<LiveSession> {
-    if (this.isPg && this.pool) {
-      const fields = Object.keys(updates);
-      const values = Object.values(updates);
-      const setClause = fields.map((f, i) => `${f} = $${i + 2}`).join(', ');
-      const sql = `UPDATE live_sessions SET ${setClause}, updated_at = NOW() WHERE id = $1 RETURNING *`;
-      const res = await this.pool.query(sql, [id, ...values]);
-      return res.rows[0];
-    } else {
-      const data = this.readLocal();
-      const index = data.live_sessions.findIndex((l: any) => l.id === id);
-      if (index === -1) throw new Error("Live non trouvé");
-      const updated = {
-        ...data.live_sessions[index],
-        ...updates,
-        updated_at: new Date().toISOString()
-      };
-      data.live_sessions[index] = updated;
-      this.writeLocal(data);
-      return updated;
-    }
+    const data: any = {};
+    if (updates.title !== undefined) data.title = updates.title;
+    if (updates.description !== undefined) data.description = updates.description;
+    if (updates.image_url !== undefined) data.imageUrl = updates.image_url;
+    if (updates.status !== undefined) data.status = updates.status;
+    if (updates.slug !== undefined) data.slug = updates.slug;
+    if (updates.start_date !== undefined) data.startDate = updates.start_date ? new Date(updates.start_date) : null;
+    if (updates.end_date !== undefined) data.endDate = updates.end_date ? new Date(updates.end_date) : null;
+    if (updates.user_id !== undefined) data.userId = updates.user_id;
+
+    const l = await prisma.liveSession.update({
+      where: { id },
+      data,
+    });
+    return mapLiveSessionToSnake(l);
   }
 
   public async deleteLiveSession(id: string): Promise<void> {
-    if (this.isPg && this.pool) {
-      await this.pool.query(`DELETE FROM live_sessions WHERE id = $1`, [id]);
-    } else {
-      const data = this.readLocal();
-      data.live_sessions = data.live_sessions.filter((l: any) => l.id !== id);
-      data.live_products = data.live_products.filter((lp: any) => lp.live_session_id !== id);
-      data.reservations = data.reservations.filter((r: any) => r.live_session_id !== id);
-      data.audit_logs = data.audit_logs.filter((al: any) => al.live_session_id !== id);
-      data.product_interests = data.product_interests.filter((pi: any) => pi.live_session_id !== id);
-      this.writeLocal(data);
-    }
+    await prisma.liveSession.delete({
+      where: { id }
+    });
   }
 
   public async createProduct(product: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> {
-    const id = `prod-${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    const newProduct: Product = {
-      id,
-      ...product,
-      created_at: now,
-      updated_at: now
-    };
-
-    if (this.isPg && this.pool) {
-      const sql = `INSERT INTO products (id, name, description, price, stock, image_url, is_active, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`;
-      const res = await this.pool.query(sql, [id, product.name, product.description, product.price, product.stock, product.image_url, product.is_active, product.user_id]);
-      return res.rows[0];
-    } else {
-      const data = this.readLocal();
-      data.products.push(newProduct);
-      this.writeLocal(data);
-      return newProduct;
-    }
+    const p = await prisma.product.create({
+      data: {
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        stock: product.stock,
+        imageUrl: product.image_url,
+        isActive: product.is_active,
+        userId: product.user_id,
+      }
+    });
+    return mapProductToSnake(p);
   }
 
   public async updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
-    if (this.isPg && this.pool) {
-      const fields = Object.keys(updates);
-      const values = Object.values(updates);
-      const setClause = fields.map((f, i) => `${f} = $${i + 2}`).join(', ');
-      const sql = `UPDATE products SET ${setClause}, updated_at = NOW() WHERE id = $1 RETURNING *`;
-      const res = await this.pool.query(sql, [id, ...values]);
-      return res.rows[0];
-    } else {
-      const data = this.readLocal();
-      const index = data.products.findIndex((p: any) => p.id === id);
-      if (index === -1) throw new Error("Produit non trouvé");
-      const updated = {
-        ...data.products[index],
-        ...updates,
-        updated_at: new Date().toISOString()
-      };
-      data.products[index] = updated;
-      this.writeLocal(data);
-      return updated;
-    }
+    const data: any = {};
+    if (updates.name !== undefined) data.name = updates.name;
+    if (updates.description !== undefined) data.description = updates.description;
+    if (updates.price !== undefined) data.price = updates.price;
+    if (updates.stock !== undefined) data.stock = updates.stock;
+    if (updates.image_url !== undefined) data.imageUrl = updates.image_url;
+    if (updates.is_active !== undefined) data.isActive = updates.is_active;
+    if (updates.user_id !== undefined) data.userId = updates.user_id;
+
+    const p = await prisma.product.update({
+      where: { id },
+      data,
+    });
+    return mapProductToSnake(p);
   }
 
   public async deleteProduct(id: string): Promise<void> {
-    if (this.isPg && this.pool) {
-      await this.pool.query(`DELETE FROM products WHERE id = $1`, [id]);
-    } else {
-      const data = this.readLocal();
-      data.products = data.products.filter((p: any) => p.id !== id);
-      data.live_products = data.live_products.filter((lp: any) => lp.product_id !== id);
-      this.writeLocal(data);
-    }
+    await prisma.product.delete({
+      where: { id }
+    });
   }
 
   public async syncLiveProducts(liveSessionId: string, productIds: string[]): Promise<void> {
-    if (this.isPg && this.pool) {
-      await this.pool.query(`DELETE FROM live_products WHERE live_session_id = $1`, [liveSessionId]);
-      for (const pId of productIds) {
-        await this.pool.query(`INSERT INTO live_products (live_session_id, product_id) VALUES ($1, $2)`, [liveSessionId, pId]);
-      }
-    } else {
-      const data = this.readLocal();
-      data.live_products = data.live_products.filter((lp: any) => lp.live_session_id !== liveSessionId);
-      productIds.forEach(pId => {
-        data.live_products.push({
-          live_session_id: liveSessionId,
-          product_id: pId,
-          created_at: new Date().toISOString()
-        });
+    // Delete existing live_products relations for this live session
+    await prisma.liveProduct.deleteMany({
+      where: { liveSessionId }
+    });
+    // Bulk create new ones
+    if (productIds.length > 0) {
+      await prisma.liveProduct.createMany({
+        data: productIds.map(pId => ({
+          liveSessionId,
+          productId: pId
+        }))
       });
-      this.writeLocal(data);
     }
   }
 
-  // ====================================================================
-  // ATOMIC RESERVATION TRANSACTION (ANTI-OVERSELLING EXECUTOR)
-  // ====================================================================
-  public async executeAtomicReservation(visitorPseudo: string, whatsapp: string | undefined, productId: string, liveSessionId: string): Promise<Reservation> {
-    if (this.isPg && this.pool) {
-      const client = await this.pool.connect();
-      try {
-        await client.query('BEGIN');
+  // ==========================================
+  // ATOMIC CONCURRENCY-SAFE RESERVATION (FOR UPDATE)
+  // ==========================================
 
-        // 1. SELECT FOR UPDATE - Lock product row to prevent concurrency race conditions
-        const productRes = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
-        if (productRes.rows.length === 0) {
-          throw new Error('Produit inexistant.');
-        }
-
-        const product = productRes.rows[0];
-        if (!product.is_active) {
-          throw new Error('Ce produit est actuellement inactif.');
-        }
-
-        // 2. Strict stock check inside transactional lock
-        if (product.stock <= 0) {
-          throw new Error('Rupture de stock ! Réservation impossible.');
-        }
-
-        // 3. Decrement stock
-        await client.query('UPDATE products SET stock = stock - 1, updated_at = NOW() WHERE id = $1', [productId]);
-
-        // 4. Create reservation
-        const resId = `res-${Math.random().toString(36).substr(2, 9)}`;
-        const rQuery = `
-          INSERT INTO reservations (id, visitor_pseudo, whatsapp, product_id, live_session_id, quantity)
-          VALUES ($1, $2, $3, $4, $5, 1) RETURNING *
-        `;
-        const resRow = await client.query(rQuery, [resId, visitorPseudo, whatsapp, productId, liveSessionId]);
-
-        // 5. Create audit log
-        const logId = `log-${Math.random().toString(36).substr(2, 9)}`;
-        await client.query(`
-          INSERT INTO audit_logs (id, live_session_id, visitor_pseudo, action_type, product_name, details)
-          VALUES ($1, $2, $3, 'reservation', $4, $5)
-        `, [logId, liveSessionId, visitorPseudo, product.name, `Réservation d'une unité validée avec succès par transaction.`]);
-
-        await client.query('COMMIT');
-        return resRow.rows[0];
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
-    } else {
-      // Local Database Mutex Sync Simulation
-      const data = this.readLocal();
-      const product = data.products.find((p: any) => p.id === productId);
-
-      if (!product) {
+  public async executeAtomicReservation(
+    visitorPseudo: string,
+    whatsapp: string | undefined,
+    productId: string,
+    liveSessionId: string
+  ): Promise<Reservation> {
+    const result = await prisma.$transaction(async (tx: any) => {
+      // 1. SELECT FOR UPDATE to acquire exclusive row-level lock on the product
+      const products: any[] = await tx.$queryRawUnsafe(
+        `SELECT id, name, description, price, stock, is_active as "isActive", user_id as "userId" FROM products WHERE id = $1::uuid FOR UPDATE`,
+        productId
+      );
+      if (products.length === 0) {
         throw new Error('Produit inexistant.');
       }
-      if (!product.is_active) {
+      const product = products[0];
+      if (!product.isActive) {
         throw new Error('Ce produit est actuellement inactif.');
       }
       if (product.stock <= 0) {
         throw new Error('Rupture de stock ! Réservation impossible.');
       }
 
-      // Decrement stock
-      product.stock -= 1;
-      product.updated_at = new Date().toISOString();
+      // 2. Safely decrement stock
+      await tx.product.update({
+        where: { id: productId },
+        data: { stock: product.stock - 1 }
+      });
 
-      // Create reservation
-      const newRes: Reservation = {
-        id: `res-${Math.random().toString(36).substr(2, 9)}`,
-        visitor_pseudo: visitorPseudo,
-        whatsapp,
-        product_id: productId,
-        live_session_id: liveSessionId,
-        quantity: 1,
-        created_at: new Date().toISOString()
-      };
-      data.reservations.push(newRes);
+      // 3. Create the Reservation record
+      const res = await tx.reservation.create({
+        data: {
+          visitorPseudo,
+          whatsapp,
+          productId,
+          liveSessionId,
+          quantity: 1
+        }
+      });
 
-      // Create log
-      const newLog: AuditLog = {
-        id: `log-${Math.random().toString(36).substr(2, 9)}`,
-        live_session_id: liveSessionId,
-        visitor_pseudo: visitorPseudo,
-        action_type: 'reservation',
-        product_name: product.name,
-        details: `Réservation d'une unité validée en local. Nouveau stock : ${product.stock}`,
-        created_at: new Date().toISOString()
-      };
-      data.audit_logs.push(newLog);
+      // 4. Log the transaction into AuditLog
+      await tx.auditLog.create({
+        data: {
+          liveSessionId,
+          visitorPseudo,
+          actionType: 'reservation',
+          productName: product.name,
+          details: `Réservation d'une unité validée avec succès par transaction.`
+        }
+      });
 
-      this.writeLocal(data);
-      return newRes;
-    }
+      return res;
+    });
+
+    return mapReservationToSnake(result);
   }
 
   public async recordInterest(visitorPseudo: string, productId: string, liveSessionId: string): Promise<void> {
-    if (this.isPg && this.pool) {
-      const id = `int-${Math.random().toString(36).substr(2, 9)}`;
-      await this.pool.query(`
-        INSERT INTO product_interests (id, visitor_pseudo, product_id, live_session_id)
-        VALUES ($1, $2, $3, $4)
-      `, [id, visitorPseudo, productId, liveSessionId]);
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { name: true }
+    });
+    const prodName = product?.name || 'Produit';
 
-      // Add log
-      const productRes = await this.pool.query('SELECT name FROM products WHERE id = $1', [productId]);
-      const prodName = productRes.rows[0]?.name || 'Produit';
-      await this.pool.query(`
-        INSERT INTO audit_logs (id, live_session_id, visitor_pseudo, action_type, product_name, details)
-        VALUES ($1, $2, $3, 'interest', $4, $5)
-      `, [`log-${Math.random().toString(36).substr(2, 9)}`, liveSessionId, visitorPseudo, prodName, `Intérêt marqué pour le produit.`]);
-    } else {
-      const data = this.readLocal();
-      const product = data.products.find((p: any) => p.id === productId);
-      const interest: ProductInterest = {
-        id: `int-${Math.random().toString(36).substr(2, 9)}`,
-        visitor_pseudo: visitorPseudo,
-        product_id: productId,
-        live_session_id: liveSessionId,
-        created_at: new Date().toISOString()
-      };
-      data.product_interests.push(interest);
-
-      // Add log
-      const log: AuditLog = {
-        id: `log-${Math.random().toString(36).substr(2, 9)}`,
-        live_session_id: liveSessionId,
-        visitor_pseudo: visitorPseudo,
-        action_type: 'interest',
-        product_name: product?.name || 'Produit',
-        details: `Intérêt marqué en local.`,
-        created_at: new Date().toISOString()
-      };
-      data.audit_logs.push(log);
-
-      this.writeLocal(data);
-    }
+    await prisma.$transaction([
+      prisma.productInterest.create({
+        data: {
+          visitorPseudo,
+          productId,
+          liveSessionId
+        }
+      }),
+      prisma.auditLog.create({
+        data: {
+          liveSessionId,
+          visitorPseudo,
+          actionType: 'interest',
+          productName: prodName,
+          details: `Intérêt marqué pour le produit.`
+        }
+      })
+    ]);
   }
 
   public async recordJoin(visitorPseudo: string, whatsapp: string | undefined, liveSessionId: string): Promise<void> {
-    if (this.isPg && this.pool) {
-      const id = `vs-${Math.random().toString(36).substr(2, 9)}`;
-      await this.pool.query(`
-        INSERT INTO visitor_sessions (id, pseudo, whatsapp, live_session_id)
-        VALUES ($1, $2, $3, $4)
-      `, [id, visitorPseudo, whatsapp, liveSessionId]);
-
-      await this.pool.query(`
-        INSERT INTO audit_logs (id, live_session_id, visitor_pseudo, action_type, details)
-        VALUES ($1, $2, $3, 'join', $4)
-      `, [`log-${Math.random().toString(36).substr(2, 9)}`, liveSessionId, visitorPseudo, 'Visiteur connecté au live.']);
-    } else {
-      const data = this.readLocal();
-      const session: VisitorSession = {
-        id: `vs-${Math.random().toString(36).substr(2, 9)}`,
-        pseudo: visitorPseudo,
-        whatsapp,
-        live_session_id: liveSessionId,
-        joined_at: new Date().toISOString()
-      };
-      data.visitor_sessions.push(session);
-
-      const log: AuditLog = {
-        id: `log-${Math.random().toString(36).substr(2, 9)}`,
-        live_session_id: liveSessionId,
-        visitor_pseudo: visitorPseudo,
-        action_type: 'join',
-        details: `Visiteur connecté en local.`,
-        created_at: new Date().toISOString()
-      };
-      data.audit_logs.push(log);
-
-      this.writeLocal(data);
-    }
+    await prisma.$transaction([
+      prisma.visitorSession.create({
+        data: {
+          pseudo: visitorPseudo,
+          whatsapp,
+          liveSessionId
+        }
+      }),
+      prisma.auditLog.create({
+        data: {
+          liveSessionId,
+          visitorPseudo,
+          actionType: 'join',
+          details: 'Visiteur connecté au live.'
+        }
+      })
+    ]);
   }
 
-  // Admin and stats lookups
+  // ==========================================
+  // REAL-TIME SAAS METRICS AND ANALYTICS
+  // ==========================================
+
   public async getAdminStats(): Promise<any> {
-    if (this.isPg && this.pool) {
-      const sellersRes = await this.pool.query("SELECT COUNT(*) FROM users WHERE role = 'SELLER'");
-      const livesRes = await this.pool.query("SELECT COUNT(*) FROM live_sessions");
-      const activeRes = await this.pool.query("SELECT COUNT(*) FROM live_sessions WHERE status IN ('ACTIVE', 'SOLD_OUT')");
-      const resRes = await this.pool.query("SELECT COUNT(*) FROM reservations");
-      const earningRes = await this.pool.query(`
-        SELECT COALESCE(SUM(p.price * r.quantity), 0) as total_sales
-        FROM reservations r
-        JOIN products p ON r.product_id = p.id
-      `);
+    const sellersCount = await prisma.user.count({
+      where: { role: 'SELLER' }
+    });
+    const totalLivesCount = await prisma.liveSession.count();
+    const activeLivesCount = await prisma.liveSession.count({
+      where: { status: { in: ['ACTIVE', 'SOLD_OUT'] } }
+    });
+    const totalReservations = await prisma.reservation.count();
 
-      return {
-        sellersCount: parseInt(sellersRes.rows[0].count),
-        totalLivesCount: parseInt(livesRes.rows[0].count),
-        activeLivesCount: parseInt(activeRes.rows[0].count),
-        totalReservations: parseInt(resRes.rows[0].count),
-        totalSales: parseFloat(earningRes.rows[0].total_sales || '0')
-      };
-    } else {
-      const data = this.readLocal();
-      const sellersCount = data.users.filter((u: any) => u.role === 'SELLER').length;
-      const totalLivesCount = data.live_sessions.length;
-      const activeLivesCount = data.live_sessions.filter((l: any) => l.status === 'ACTIVE' || l.status === 'SOLD_OUT').length;
-      const totalReservations = data.reservations.length;
+    const earningRes: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COALESCE(SUM(p.price * r.quantity), 0) as total_sales
+      FROM reservations r
+      JOIN products p ON r.product_id = p.id
+    `);
+    const totalSales = earningRes.length > 0 ? Number(earningRes[0].total_sales) : 0;
 
-      const totalSales = data.reservations.reduce((sum: number, r: any) => {
-        const prod = data.products.find((p: any) => p.id === r.product_id);
-        return sum + (prod ? prod.price * r.quantity : 0);
-      }, 0);
-
-      return {
-        sellersCount,
-        totalLivesCount,
-        activeLivesCount,
-        totalReservations,
-        totalSales
-      };
-    }
+    return {
+      sellersCount,
+      totalLivesCount,
+      activeLivesCount,
+      totalReservations,
+      totalSales
+    };
   }
 
   public async getSellerStats(userId: string): Promise<any> {
-    if (this.isPg && this.pool) {
-      const totalRes = await this.pool.query(`
-        SELECT COUNT(*), COALESCE(SUM(p.price * r.quantity), 0) as total_earnings
-        FROM reservations r
-        JOIN products p ON r.product_id = p.id
-        WHERE r.live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1)
-      `, [userId]);
+    const totalRes: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*), COALESCE(SUM(p.price * r.quantity), 0) as total_earnings
+      FROM reservations r
+      JOIN products p ON r.product_id = p.id
+      WHERE r.live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
+    `, userId);
 
-      const totalInt = await this.pool.query(`
-        SELECT COUNT(*) FROM product_interests
-        WHERE live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1)
-      `, [userId]);
+    const totalInt: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*) FROM product_interests
+      WHERE live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
+    `, userId);
 
-      return {
-        totalReservationsCount: parseInt(totalRes.rows[0].count || '0'),
-        totalEarnings: parseFloat(totalRes.rows[0].total_earnings || '0'),
-        totalInterestsCount: parseInt(totalInt.rows[0].count || '0')
-      };
-    } else {
-      const data = this.readLocal();
-      const sellerLiveIds = data.live_sessions.filter((l: any) => l.user_id === userId).map((l: any) => l.id);
-      
-      const sellerRes = data.reservations.filter((r: any) => sellerLiveIds.includes(r.live_session_id));
-      const totalReservationsCount = sellerRes.length;
+    const preRegRes: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*) FROM live_notifications
+      WHERE live_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
+    `, userId);
 
-      const totalEarnings = sellerRes.reduce((sum: number, r: any) => {
-        const prod = data.products.find((p: any) => p.id === r.product_id);
-        return sum + (prod ? prod.price * r.quantity : 0);
-      }, 0);
+    const preVisitorsRes: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*) FROM visitor_sessions vs
+      JOIN live_sessions ls ON vs.live_session_id = ls.id
+      WHERE ls.user_id = $1::uuid AND vs.joined_at < ls.start_date
+    `, userId);
 
-      const totalInterestsCount = data.product_interests.filter((i: any) => sellerLiveIds.includes(i.live_session_id)).length;
+    return {
+      totalReservationsCount: totalRes.length > 0 ? parseInt(totalRes[0].count || '0') : 0,
+      totalEarnings: totalRes.length > 0 ? Number(totalRes[0].total_earnings || '0') : 0,
+      totalInterestsCount: totalInt.length > 0 ? parseInt(totalInt[0].count || '0') : 0,
+      preRegistrationsCount: preRegRes.length > 0 ? parseInt(preRegRes[0].count || '0') : 0,
+      preVisitorsCount: preVisitorsRes.length > 0 ? parseInt(preVisitorsRes[0].count || '0') : 0
+    };
+  }
 
-      return {
-        totalReservationsCount,
-        totalEarnings,
-        totalInterestsCount
-      };
+  public async createLiveNotification(notif: Omit<LiveNotification, 'id' | 'created_at'>): Promise<LiveNotification> {
+    const n = await prisma.liveNotification.create({
+      data: {
+        liveId: notif.live_id,
+        pseudo: notif.pseudo,
+        whatsapp: notif.whatsapp
+      }
+    });
+    return mapLiveNotificationToSnake(n);
+  }
+
+  // ==========================================
+  // AUTONOMOUS DATE & LIFECYCLE CONTROLLER
+  // ==========================================
+
+  public async autoCheckDates(): Promise<void> {
+    try {
+      const lives = await prisma.liveSession.findMany();
+      const now = new Date();
+
+      for (const live of lives) {
+        if (live.status === 'DRAFT') {
+          continue;
+        }
+
+        const start = live.startDate ? new Date(live.startDate) : null;
+        const end = live.endDate ? new Date(live.endDate) : null;
+        if (!start || !end) continue;
+
+        const thirtyDaysAfterEnd = new Date(end.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+        let targetStatus: LiveSession['status'] = live.status;
+
+        if (now >= thirtyDaysAfterEnd) {
+          targetStatus = 'ARCHIVED';
+        } else if (now >= end) {
+          targetStatus = 'ENDED';
+        } else if (now >= start && now < end) {
+          // Check linked products in the catalog
+          const products = await prisma.product.findMany({
+            where: {
+              isActive: true,
+              lives: {
+                some: {
+                  liveSessionId: live.id
+                }
+              }
+            }
+          });
+          
+          const allSoldOut = products.length > 0 && products.every((p: any) => p.stock <= 0);
+          if (allSoldOut) {
+            targetStatus = 'SOLD_OUT';
+          } else {
+            targetStatus = 'ACTIVE';
+          }
+        } else {
+          targetStatus = 'SCHEDULED';
+        }
+
+        if (live.status !== targetStatus) {
+          await prisma.liveSession.update({
+            where: { id: live.id },
+            data: { status: targetStatus }
+          });
+          console.log(`Auto-transitioned live session ${live.id} from ${live.status} to ${targetStatus}`);
+        }
+      }
+    } catch (e) {
+      console.error("Error auto-checking dates:", e);
     }
   }
 }

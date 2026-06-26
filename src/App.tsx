@@ -43,6 +43,10 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
   const [showLiveModal, setShowLiveModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
+  const [showReactivateModal, setShowReactivateModal] = useState(false);
+  const [reactivateLiveId, setReactivateLiveId] = useState<string | null>(null);
+  const [reactivateStart, setReactivateStart] = useState('');
+  const [reactivateEnd, setReactivateEnd] = useState('');
   
   // Edit states
   const [liveEditId, setLiveEditId] = useState<string | null>(null);
@@ -394,6 +398,34 @@ export default function App() {
       } else {
         const d = await res.json();
         showToast(d.error || "Mise à jour impossible", "error");
+      }
+    } catch (e) {
+      showToast("Erreur réseau.", "error");
+    }
+  };
+
+  const handleReactivateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reactivateLiveId || !reactivateStart || !reactivateEnd) {
+      showToast("Veuillez renseigner les dates de début et de fin.", "error");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/lives/${reactivateLiveId}/reactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_date: reactivateStart, end_date: reactivateEnd })
+      });
+      if (res.ok) {
+        showToast("Session live réactivée avec succès ! Les produits ont été associés.");
+        setShowReactivateModal(false);
+        setReactivateLiveId(null);
+        setReactivateStart('');
+        setReactivateEnd('');
+        fetchSellerData();
+      } else {
+        const d = await res.json();
+        showToast(d.error || "Réactivation impossible", "error");
       }
     } catch (e) {
       showToast("Erreur réseau.", "error");
@@ -966,34 +998,54 @@ export default function App() {
         <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 flex flex-col space-y-8">
           
           {/* Quick Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-slate-900 border border-slate-850 p-6 rounded-2xl flex items-center justify-between shadow-lg">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
               <div className="space-y-1">
                 <span className="text-xs text-slate-400 font-bold">Réservations</span>
-                <p className="text-2xl font-black text-white">{analytics?.totalReservationsCount || 0}</p>
+                <p className="text-xl font-black text-white">{analytics?.totalReservationsCount || 0}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
-                <CheckCircle2 className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
+                <CheckCircle2 className="w-5 h-5" />
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-850 p-6 rounded-2xl flex items-center justify-between shadow-lg">
+            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
               <div className="space-y-1">
                 <span className="text-xs text-slate-400 font-bold">Chiffre d'Affaires</span>
-                <p className="text-2xl font-black text-white">{(analytics?.totalEarnings || 0).toLocaleString('fr-FR')} FCFA</p>
+                <p className="text-xl font-black text-white">{(analytics?.totalEarnings || 0).toLocaleString('fr-FR')} FCFA</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
-                <Tag className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400">
+                <Tag className="w-5 h-5" />
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-850 p-6 rounded-2xl flex items-center justify-between shadow-lg">
+            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
               <div className="space-y-1">
                 <span className="text-xs text-slate-400 font-bold">Intérêts Marqués</span>
-                <p className="text-2xl font-black text-white">{analytics?.totalInterestsCount || 0}</p>
+                <p className="text-xl font-black text-white">{analytics?.totalInterestsCount || 0}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
-                <Heart className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl bg-pink-500/15 flex items-center justify-center text-pink-400">
+                <Heart className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-400 font-bold">Pré-inscriptions</span>
+                <p className="text-xl font-black text-white">{analytics?.preRegistrationsCount || 0}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center text-violet-400">
+                <Users className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-400 font-bold">Visiteurs Pré-live</span>
+                <p className="text-xl font-black text-white">{analytics?.preVisitorsCount || 0}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400">
+                <Clock className="w-5 h-5" />
               </div>
             </div>
           </div>
@@ -1020,7 +1072,7 @@ export default function App() {
 
           {/* Tab Contents: LIVES */}
           {sellerTab === 'lives' && (
-            <div className="space-y-6">
+            <div className="space-y-8">
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-md font-bold text-white">Sessions de Directs</h3>
@@ -1041,96 +1093,215 @@ export default function App() {
                   <p className="text-xs text-slate-400 max-w-sm mx-auto">Créez votre premier live temporaire et associez-lui des articles de votre catalogue.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {lives.map(l => (
-                    <div key={l.id} className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-md flex flex-col justify-between">
-                      <div className="p-5 space-y-4">
-                        <div className="flex justify-between items-start">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            l.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/20' :
-                            l.status === 'DRAFT' ? 'bg-slate-800 text-slate-400' :
-                            l.status === 'SOLD_OUT' ? 'bg-amber-950 text-amber-400 border border-amber-500/20' :
-                            'bg-rose-950 text-rose-400'
-                          }`}>
-                            {l.status}
-                          </span>
-                          
-                          {/* Live activation switch */}
-                          <div className="flex items-center space-x-1.5">
-                            {l.status !== 'ACTIVE' ? (
+                <div className="space-y-8">
+                  {/* Active / Scheduled / Draft Section */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase text-indigo-400 tracking-wider">Sessions Actives & Planifiées</h4>
+                    {lives.filter(l => l.status !== 'ARCHIVED').length === 0 ? (
+                      <p className="text-xs text-slate-500 italic bg-slate-900/20 border border-slate-850 p-4 rounded-xl">Aucune session active ou planifiée.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {lives.filter(l => l.status !== 'ARCHIVED').map(l => (
+                          <div key={l.id} className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-md flex flex-col justify-between">
+                            <div className="p-5 space-y-4">
+                              <div className="flex justify-between items-start">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  l.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/20 animate-pulse' :
+                                  l.status === 'DRAFT' ? 'bg-slate-800 text-slate-400' :
+                                  l.status === 'SCHEDULED' ? 'bg-blue-950 text-blue-400 border border-blue-500/20' :
+                                  l.status === 'SOLD_OUT' ? 'bg-amber-950 text-amber-400 border border-amber-500/20' :
+                                  'bg-rose-950 text-rose-400'
+                                }`}>
+                                  {l.status}
+                                </span>
+                                
+                                {/* Lifecycle Buttons */}
+                                <div className="flex items-center space-x-1">
+                                  {l.status === 'DRAFT' && (
+                                    <>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'SCHEDULED')}
+                                        className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Planifier
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
+                                        className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Lancer
+                                      </button>
+                                    </>
+                                  )}
+                                  {l.status === 'SCHEDULED' && (
+                                    <button 
+                                      onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
+                                      className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                    >
+                                      Démarrer le Live
+                                    </button>
+                                  )}
+                                  {l.status === 'ACTIVE' && (
+                                    <>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'SOLD_OUT')}
+                                        className="text-[10px] bg-amber-600 hover:bg-amber-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Épuisé
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ENDED')}
+                                        className="text-[10px] bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Clôturer
+                                      </button>
+                                    </>
+                                  )}
+                                  {l.status === 'SOLD_OUT' && (
+                                    <>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
+                                        className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Activer
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ENDED')}
+                                        className="text-[10px] bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Clôturer
+                                      </button>
+                                    </>
+                                  )}
+                                  {l.status === 'ENDED' && (
+                                    <button 
+                                      onClick={() => { setReactivateLiveId(l.id); setShowReactivateModal(true); }}
+                                      className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                    >
+                                      Réactiver
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <h4 className="text-sm font-bold text-white line-clamp-1">{l.title}</h4>
+                                <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{l.description}</p>
+                              </div>
+
+                              <div className="text-[11px] text-slate-400 space-y-1.5 pt-3 border-t border-slate-850">
+                                <div className="flex justify-between">
+                                  <span>Lien boutique :</span>
+                                  <a 
+                                    href={`#live/${l.slug}`} 
+                                    target="_blank" 
+                                    className="text-indigo-400 hover:underline flex items-center gap-0.5"
+                                  >
+                                    /{l.slug} <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Début :</span>
+                                  <span>{new Date(l.start_date).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Fin :</span>
+                                  <span>{new Date(l.end_date).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-950/80 px-5 py-3 border-t border-slate-850/50 flex justify-between gap-2">
                               <button 
-                                onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
-                                className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                onClick={() => handleEditLiveClick(l)}
+                                className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1 transition"
                               >
-                                Activer
+                                <Edit className="w-3.5 h-3.5" /> Éditer
                               </button>
-                            ) : (
                               <button 
-                                onClick={() => handleToggleLiveStatus(l, 'INACTIVE')}
-                                className="text-[10px] bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                onClick={() => {
+                                  fetch(`/api/lives/${l.id}/analytics`)
+                                    .then(r => r.json())
+                                    .then(data => {
+                                      alert(`Rapport en direct - ${l.title}\n\nVisiteurs uniques : ${data.uniqueVisitorsCount || 0}\nRéservations totales : ${data.reservationsCount || 0}\nArticles mis en avant : ${data.interestsCount || 0}\nPré-inscriptions : ${data.preRegistrationsCount || 0}\nVisiteurs pré-live : ${data.visitorsBeforeStartCount || 0}\nTaux conversion pré-inscrit : ${data.preRegistrationConversionRate || 0}%`);
+                                    });
+                                }}
+                                className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
                               >
-                                Arrêter
+                                <BarChart3 className="w-3.5 h-3.5" /> Analytiques
                               </button>
-                            )}
+                              <button 
+                                onClick={() => handleDeleteLive(l.id)}
+                                className="text-xs font-bold text-rose-500 hover:text-rose-400 flex items-center gap-1 transition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" /> Effacer
+                              </button>
+                            </div>
                           </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-bold text-white line-clamp-1">{l.title}</h4>
-                          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{l.description}</p>
-                        </div>
-
-                        <div className="text-[11px] text-slate-400 space-y-1.5 pt-3 border-t border-slate-850">
-                          <div className="flex justify-between">
-                            <span>Lien boutique :</span>
-                            <a 
-                              href={`#live/${l.slug}`} 
-                              target="_blank" 
-                              className="text-indigo-400 hover:underline flex items-center gap-0.5"
-                            >
-                              /{l.slug} <ExternalLink className="w-3 h-3" />
-                            </a>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Début :</span>
-                            <span>{new Date(l.start_date).toLocaleString()}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Fin :</span>
-                            <span>{new Date(l.end_date).toLocaleString()}</span>
-                          </div>
-                        </div>
+                        ))}
                       </div>
+                    )}
+                  </div>
 
-                      <div className="bg-slate-950/80 px-5 py-3 border-t border-slate-850/50 flex justify-between gap-2">
-                        <button 
-                          onClick={() => handleEditLiveClick(l)}
-                          className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1 transition"
-                        >
-                          <Edit className="w-3.5 h-3.5" /> Éditer
-                        </button>
-                        <button 
-                          onClick={() => {
-                            // View dynamic audits or stats
-                            fetch(`/api/lives/${l.id}/analytics`)
-                              .then(r => r.json())
-                              .then(data => {
-                                alert(`Rapport en direct - ${l.title}\n\nVisiteurs uniques : ${data.uniqueVisitorsCount}\nRéservations totales : ${data.reservationsCount}\nArticles mis en avant : ${data.interestsCount}`);
-                              });
-                          }}
-                          className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
-                        >
-                          <BarChart3 className="w-3.5 h-3.5" /> Analytiques
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteLive(l.id)}
-                          className="text-xs font-bold text-rose-500 hover:text-rose-400 flex items-center gap-1 transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Effacer
-                        </button>
+                  {/* Archived History Section */}
+                  <div className="space-y-4 pt-4 border-t border-slate-850">
+                    <h4 className="text-xs font-bold uppercase text-purple-400 tracking-wider">Historique des Sessions Archivées</h4>
+                    {lives.filter(l => l.status === 'ARCHIVED').length === 0 ? (
+                      <p className="text-xs text-slate-500 italic bg-slate-900/10 border border-slate-850/50 p-4 rounded-xl">Aucune session archivée dans l'historique.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {lives.filter(l => l.status === 'ARCHIVED').map(l => (
+                          <div key={l.id} className="bg-slate-900/60 border border-slate-850 rounded-2xl overflow-hidden shadow-md flex flex-col justify-between opacity-75 hover:opacity-100 transition">
+                            <div className="p-5 space-y-4">
+                              <div className="flex justify-between items-start">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-950 text-purple-400 border border-purple-500/20">
+                                  ARCHIVÉ
+                                </span>
+                                
+                                <button 
+                                  onClick={() => { setReactivateLiveId(l.id); setShowReactivateModal(true); }}
+                                  className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                >
+                                  Réactiver
+                                </button>
+                              </div>
+
+                              <div className="space-y-1">
+                                <h4 className="text-sm font-bold text-slate-300 line-clamp-1">{l.title}</h4>
+                                <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{l.description}</p>
+                              </div>
+
+                              <div className="text-[11px] text-slate-500 space-y-1.5 pt-3 border-t border-slate-850">
+                                <div className="flex justify-between">
+                                  <span>Slug archive :</span>
+                                  <span className="font-mono text-slate-400">{l.slug}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Session du :</span>
+                                  <span>{new Date(l.start_date).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-950/80 px-5 py-3 border-t border-slate-850/50 flex justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  fetch(`/api/lives/${l.id}/analytics`)
+                                    .then(r => r.json())
+                                    .then(data => {
+                                      alert(`Rapport Session Archivée - ${l.title}\n\nVisiteurs uniques : ${data.uniqueVisitorsCount || 0}\nRéservations totales : ${data.reservationsCount || 0}\nArticles mis en avant : ${data.interestsCount || 0}\nPré-inscriptions : ${data.preRegistrationsCount || 0}\nVisiteurs pré-live : ${data.visitorsBeforeStartCount || 0}`);
+                                    });
+                                }}
+                                className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
+                              >
+                                <BarChart3 className="w-3.5 h-3.5" /> Rapport Final
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1319,6 +1490,64 @@ export default function App() {
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md"
                 >
                   {liveEditId ? "Enregistrer les modifications" : "Lancer ma boutique temporaire"}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL REACTIVATION LIVE */}
+        {showReactivateModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 max-w-md w-full rounded-2xl overflow-hidden shadow-2xl">
+              <div className="bg-slate-950 px-6 py-4 border-b border-slate-850 flex justify-between items-center">
+                <h3 className="text-sm font-bold text-white">Réactiver la session Live</h3>
+                <button 
+                  onClick={() => { setShowReactivateModal(false); setReactivateLiveId(null); }} 
+                  className="text-slate-400 hover:text-white text-xs font-bold"
+                >
+                  Fermer
+                </button>
+              </div>
+
+              <form onSubmit={handleReactivateSubmit} className="p-6 space-y-4">
+                <div className="bg-indigo-950/20 border border-indigo-500/20 p-4 rounded-xl space-y-2">
+                  <p className="text-xs text-indigo-300 leading-relaxed font-bold">
+                    Cette action va clore et archiver la session précédente (historique conservé) et initialiser une nouvelle période de vente avec le même lien public.
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Les produits liés à l'ancien live seront automatiquement associés à cette nouvelle session commerciale.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400 font-bold uppercase block">Date de début programmée *</label>
+                  <input 
+                    type="datetime-local" 
+                    required 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    value={reactivateStart}
+                    onChange={(e) => setReactivateStart(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400 font-bold uppercase block">Date de fin programmée * (Max 24h)</label>
+                  <input 
+                    type="datetime-local" 
+                    required 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    value={reactivateEnd}
+                    onChange={(e) => setReactivateEnd(e.target.value)}
+                  />
+                  <span className="text-[9px] text-slate-500 block">Pour des raisons de performance, la durée de la boutique live est limitée à 24 heures.</span>
+                </div>
+
+                <button 
+                  type="submit"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md flex items-center justify-center gap-1"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Initialiser la nouvelle session
                 </button>
               </form>
             </div>
@@ -1688,122 +1917,172 @@ export default function App() {
         <main className="max-w-7xl w-full mx-auto px-6 py-8 flex-1 flex flex-col space-y-6">
           
           {publicLive ? (
-            <>
-              {/* Banner Details */}
-              <div className="bg-slate-900 border border-slate-850 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase ${
-                      publicLive.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/30 animate-pulse' :
-                      publicLive.status === 'SOLD_OUT' ? 'bg-amber-950 text-amber-400 border border-amber-800/30' :
-                      'bg-slate-800 text-slate-400'
-                    }`}>
-                      {publicLive.status === 'ACTIVE' ? '⚫ LIVE EN COURS' : `STATUT BOUTIQUE : ${publicLive.status}`}
-                    </span>
-                  </div>
-                  <h1 className="text-lg md:text-xl font-extrabold text-white">{publicLive.title}</h1>
-                  <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">{publicLive.description}</p>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs text-slate-400 font-bold bg-slate-950 border border-slate-850 p-3 rounded-xl shrink-0">
-                  <Clock className="w-4 h-4 text-indigo-400" />
-                  <span>Ferme le : {new Date(publicLive.end_date).toLocaleString()}</span>
-                </div>
+            publicLive.status === 'DRAFT' ? (
+              <div className="bg-slate-900 border border-slate-850 p-12 text-center rounded-2xl space-y-4 my-8">
+                <AlertCircle className="w-12 h-12 text-slate-500 mx-auto" />
+                <h4 className="text-sm font-bold text-white">Boutique en préparation</h4>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                  Cette boutique live est actuellement en cours de préparation par son créateur (mode brouillon) et n'est pas encore accessible au public.
+                </p>
+                <button onClick={() => navigateTo('')} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition">
+                  Retour à l'accueil
+                </button>
               </div>
+            ) : (
+              <>
+                {/* Banner Details */}
+                <div className="bg-slate-900 border border-slate-850 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase ${
+                        publicLive.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/30 animate-pulse' :
+                        publicLive.status === 'SOLD_OUT' ? 'bg-amber-950 text-amber-400 border border-amber-800/30' :
+                        publicLive.status === 'SCHEDULED' ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/30' :
+                        'bg-rose-950 text-rose-400 border border-rose-800/30'
+                      }`}>
+                        {publicLive.status === 'ACTIVE' ? '⚫ LIVE EN COURS' :
+                         publicLive.status === 'SOLD_OUT' ? '🟠 TOUT EST VENDU' :
+                         publicLive.status === 'SCHEDULED' ? '🔵 LIVE PROGRAMMÉ' :
+                         '🔴 LIVE TERMINÉ'}
+                      </span>
+                    </div>
+                    <h1 className="text-lg md:text-xl font-extrabold text-white">{publicLive.title}</h1>
+                    <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">{publicLive.description}</p>
+                  </div>
 
-              {/* Products Catalog Display */}
-              {publicLive.status === 'SOLD_OUT' || publicProducts.length === 0 ? (
-                <div className="bg-amber-950/20 border border-amber-800/30 p-12 rounded-2xl text-center space-y-3">
-                  <ShoppingBag className="w-12 h-12 text-amber-500/60 mx-auto" />
-                  <h4 className="text-sm font-bold text-amber-300">Tous les produits sont épuisés !</h4>
-                  <p className="text-xs text-amber-400 max-w-md mx-auto leading-relaxed">
-                    Vous avez été extrêmement rapides ! Le créateur met actuellement de nouveaux articles en ligne. Restez connectés.
-                  </p>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div className="flex items-center gap-2 text-xs text-slate-400 font-bold bg-slate-950 border border-slate-850 p-3 rounded-xl">
+                      <Clock className="w-4 h-4 text-indigo-400" />
+                      <span>{publicLive.status === 'SCHEDULED' ? `Débute le : ${new Date(publicLive.start_date).toLocaleString()}` : `Ferme le : ${new Date(publicLive.end_date).toLocaleString()}`}</span>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {publicProducts.map(p => (
-                    <div key={p.id} className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between">
-                      <div className="h-48 bg-slate-950 relative">
-                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
-                        
-                        {p.stock <= 0 ? (
-                          <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center backdrop-blur-xs">
-                            <span className="px-3 py-1 bg-rose-600 text-white rounded text-xs font-bold uppercase tracking-wider">
-                              Rupture de Stock / Sold Out
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950/90 text-indigo-400 border border-indigo-500/20 backdrop-blur-sm">
-                            {p.stock} pièces disponibles !
-                          </div>
-                        )}
-                      </div>
 
-                      <div className="p-5 space-y-4 flex-1 flex flex-col justify-between">
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-start">
-                            <h4 className="text-sm font-bold text-white">{p.name}</h4>
-                            <span className="text-sm font-bold text-indigo-400 shrink-0">{p.price.toLocaleString('fr-FR')} FCFA</span>
-                          </div>
-                          <p className="text-xs text-slate-400 leading-relaxed">{p.description}</p>
+                {/* SCHEDULED COUNTDOWN AND PRE-REGISTRATION ROW */}
+                {publicLive.status === 'SCHEDULED' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center bg-slate-900/60 border border-slate-850 rounded-2xl p-6 shadow-lg">
+                    <div className="space-y-4 text-center lg:text-left">
+                      <h3 className="text-md font-extrabold text-white">Le live commence dans :</h3>
+                      <LiveCountdown startDate={publicLive.start_date} onComplete={fetchPublicLive} />
+                    </div>
+                    <div>
+                      <PreRegistrationForm slug={publicLive.slug} onRegistered={fetchPublicLive} />
+                    </div>
+                  </div>
+                )}
+
+                {/* ENDED / ARCHIVED WARNING BANNER */}
+                {(publicLive.status === 'ENDED' || publicLive.status === 'ARCHIVED') && (
+                  <div className="bg-rose-950/25 border border-rose-800/30 p-6 rounded-2xl text-center space-y-2">
+                    <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto" />
+                    <h4 className="text-sm font-bold text-rose-300">Cette session en direct est terminée</h4>
+                    <p className="text-xs text-rose-400/80 max-w-lg mx-auto">
+                      La boutique éphémère est maintenant clôturée. Les réservations et manifestations d'intérêt sont closes pour cette session commerciale.
+                    </p>
+                  </div>
+                )}
+
+                {/* Products Catalog Display */}
+                {publicLive.status === 'SOLD_OUT' || publicProducts.length === 0 ? (
+                  <div className="bg-amber-950/20 border border-amber-800/30 p-12 rounded-2xl text-center space-y-3">
+                    <ShoppingBag className="w-12 h-12 text-amber-500/60 mx-auto" />
+                    <h4 className="text-sm font-bold text-amber-300">Tous les produits sont épuisés !</h4>
+                    <p className="text-xs text-amber-400 max-w-md mx-auto leading-relaxed">
+                      Vous avez été extrêmement rapides ! Le créateur met actuellement de nouveaux articles en ligne. Restez connectés.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {publicProducts.map(p => (
+                      <div key={p.id} className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between">
+                        <div className="h-48 bg-slate-950 relative">
+                          <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                          
+                          {p.stock <= 0 ? (
+                            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center backdrop-blur-xs">
+                              <span className="px-3 py-1 bg-rose-600 text-white rounded text-xs font-bold uppercase tracking-wider">
+                                Rupture de Stock / Sold Out
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950/90 text-indigo-400 border border-indigo-500/20 backdrop-blur-sm">
+                              {p.stock} pièces disponibles !
+                            </div>
+                          )}
                         </div>
 
-                        {/* Actions for public buyers */}
-                        {publicLive.status === 'ACTIVE' && p.stock > 0 && (
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-850">
-                            <button
-                              onClick={() => handleVisitorInterest(p.id)}
-                              className="py-2 rounded-xl text-[11px] font-bold bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 transition flex items-center justify-center gap-1"
-                            >
-                              <Heart className="w-3.5 h-3.5 text-pink-500" />
-                              Intéressé !
-                            </button>
-
-                            <button
-                              onClick={() => handleVisitorReserve(p.id)}
-                              className="py-2 rounded-xl text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/10 transition flex items-center justify-center gap-1"
-                            >
-                              <ShoppingCart className="w-3.5 h-3.5 text-indigo-200" />
-                              Réserver !
-                            </button>
+                        <div className="p-5 space-y-4 flex-1 flex flex-col justify-between">
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-start">
+                              <h4 className="text-sm font-bold text-white">{p.name}</h4>
+                              <span className="text-sm font-bold text-indigo-400 shrink-0">{p.price.toLocaleString('fr-FR')} FCFA</span>
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">{p.description}</p>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
 
-              {/* Dynamic activity terminal for social proof */}
-              <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-3 shadow-lg">
-                <div className="flex justify-between items-center border-b border-slate-850 pb-2.5">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
-                    Flux d'activités en direct
-                  </h4>
-                  <span className="text-[10px] text-slate-500">Mise à jour en direct...</span>
-                </div>
-                
-                <div className="max-h-36 overflow-y-auto space-y-2 text-xs font-mono">
-                  {publicLogs.length === 0 ? (
-                    <p className="text-slate-500 text-[11px] italic">Aucune action enregistrée pour le moment. Soyez le premier à réserver !</p>
-                  ) : (
-                    publicLogs.map((log: any) => (
-                      <div key={log.id} className="flex items-start space-x-2 text-[11px] text-slate-300">
-                        <span className="text-slate-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
-                        <p>
-                          <strong className="text-indigo-400 font-bold">{log.visitor_pseudo}</strong>
-                          {log.action_type === 'join' && <span className="text-emerald-400"> a rejoint le direct !</span>}
-                          {log.action_type === 'interest' && <span> est intéressé par le produit <strong className="text-white">{log.product_name}</strong></span>}
-                          {log.action_type === 'reservation' && <span className="text-amber-400"> a validé une réservation pour <strong className="text-white">{log.product_name}</strong> !</span>}
-                        </p>
+                          {/* Actions for public buyers */}
+                          {publicLive.status === 'ACTIVE' && p.stock > 0 ? (
+                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-850">
+                              <button
+                                onClick={() => handleVisitorInterest(p.id)}
+                                className="py-2 rounded-xl text-[11px] font-bold bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 transition flex items-center justify-center gap-1"
+                              >
+                                <Heart className="w-3.5 h-3.5 text-pink-500" />
+                                Intéressé !
+                              </button>
+
+                              <button
+                                onClick={() => handleVisitorReserve(p.id)}
+                                className="py-2 rounded-xl text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/10 transition flex items-center justify-center gap-1"
+                              >
+                                <ShoppingCart className="w-3.5 h-3.5 text-indigo-200" />
+                                Réserver !
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="pt-2 border-t border-slate-850 text-center">
+                              <span className="text-[11px] text-slate-500 font-bold block">
+                                {publicLive.status === 'SCHEDULED' ? "Reservations au lancement" : "Boutique fermée"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ))
-                  )}
+                    ))}
+                  </div>
+                )}
+
+                {/* Dynamic activity terminal for social proof */}
+                <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-3 shadow-lg">
+                  <div className="flex justify-between items-center border-b border-slate-850 pb-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
+                      Flux d'activités en direct
+                    </h4>
+                    <span className="text-[10px] text-slate-500">Mise à jour en direct...</span>
+                  </div>
+                  
+                  <div className="max-h-36 overflow-y-auto space-y-2 text-xs font-mono">
+                    {publicLogs.length === 0 ? (
+                      <p className="text-slate-500 text-[11px] italic">Aucune action enregistrée pour le moment. Soyez le premier à réserver !</p>
+                    ) : (
+                      publicLogs.map((log: any) => (
+                        <div key={log.id} className="flex items-start space-x-2 text-[11px] text-slate-300">
+                          <span className="text-slate-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                          <p>
+                            <strong className="text-indigo-400 font-bold">{log.visitor_pseudo}</strong>
+                            {log.action_type === 'join' && <span className="text-emerald-400"> a rejoint le direct !</span>}
+                            {log.action_type === 'interest' && <span> est intéressé par le produit <strong className="text-white">{log.product_name}</strong></span>}
+                            {log.action_type === 'reservation' && <span className="text-amber-400"> a validé une réservation pour <strong className="text-white">{log.product_name}</strong> !</span>}
+                            {log.action_type === 'pre-register' && <span className="text-indigo-400"> s'est pré-inscrit(e) pour le lancement !</span>}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
-            </>
+              </>
+            )
           ) : (
             <div className="bg-slate-900 border border-slate-850 p-12 text-center rounded-2xl space-y-3 my-8">
               <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
@@ -1880,3 +2159,144 @@ export default function App() {
 
   return null;
 }
+
+interface CountdownProps {
+  startDate: string;
+  onComplete?: () => void;
+}
+
+const LiveCountdown: React.FC<CountdownProps> = ({ startDate, onComplete }) => {
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const difference = new Date(startDate).getTime() - new Date().getTime();
+      if (difference <= 0) {
+        if (onComplete) onComplete();
+        return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+      }
+      return {
+        days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((difference / 1000 / 60) % 60),
+        seconds: Math.floor((difference / 1000) % 60)
+      };
+    };
+
+    setTimeLeft(calculateTimeLeft());
+    const timer = setInterval(() => {
+      setTimeLeft(calculateTimeLeft());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [startDate, onComplete]);
+
+  return (
+    <div className="flex gap-4 justify-center items-center font-mono">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center min-w-[70px]">
+        <span className="text-2xl md:text-3xl font-black text-indigo-400 block">{String(timeLeft.days).padStart(2, '0')}</span>
+        <span className="text-[10px] text-slate-400 uppercase font-bold">Jours</span>
+      </div>
+      <span className="text-xl font-bold text-slate-600">:</span>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center min-w-[70px]">
+        <span className="text-2xl md:text-3xl font-black text-indigo-400 block">{String(timeLeft.hours).padStart(2, '0')}</span>
+        <span className="text-[10px] text-slate-400 uppercase font-bold">Heures</span>
+      </div>
+      <span className="text-xl font-bold text-slate-600">:</span>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center min-w-[70px]">
+        <span className="text-2xl md:text-3xl font-black text-indigo-400 block">{String(timeLeft.minutes).padStart(2, '0')}</span>
+        <span className="text-[10px] text-slate-400 uppercase font-bold">Min</span>
+      </div>
+      <span className="text-xl font-bold text-slate-600">:</span>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center min-w-[70px]">
+        <span className="text-2xl md:text-3xl font-black text-rose-500 block animate-pulse">{String(timeLeft.seconds).padStart(2, '0')}</span>
+        <span className="text-[10px] text-slate-400 uppercase font-bold">Sec</span>
+      </div>
+    </div>
+  );
+};
+
+const PreRegistrationForm: React.FC<{ slug: string; onRegistered: () => void }> = ({ slug, onRegistered }) => {
+  const [pseudo, setPseudo] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pseudo.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/lives/public/${slug}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pseudo: pseudo.trim(), whatsapp: whatsapp.trim() })
+      });
+      if (res.ok) {
+        setDone(true);
+        onRegistered();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Erreur lors de l'inscription");
+      }
+    } catch (err) {
+      alert("Erreur de connexion.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="bg-emerald-950/35 border border-emerald-500/20 p-6 rounded-2xl text-center space-y-2 max-w-md mx-auto">
+        <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+        <h4 className="text-sm font-bold text-emerald-300">Pré-inscription enregistrée !</h4>
+        <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          Vous recevrez une alerte dès que le vendeur ouvrira sa boutique en direct !
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-850 p-6 rounded-2xl space-y-4 max-w-md w-full mx-auto">
+      <div className="text-center space-y-1">
+        <h4 className="text-sm font-bold text-white">Inscrivez-vous pour ne pas rater ce Live !</h4>
+        <p className="text-xs text-slate-400">Recevez une alerte de lancement et accédez à la boutique en priorité.</p>
+      </div>
+      
+      <div className="space-y-3">
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Votre Pseudo *</label>
+          <input
+            type="text"
+            required
+            value={pseudo}
+            onChange={e => setPseudo(e.target.value)}
+            placeholder="Ex: Fatou, Amadou, Marie..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Numéro WhatsApp (Optionnel)</label>
+          <input
+            type="text"
+            value={whatsapp}
+            onChange={e => setWhatsapp(e.target.value)}
+            placeholder="Ex: +221 77..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2.5 rounded-xl text-xs transition"
+        >
+          {loading ? "Chargement..." : "Prévenez-moi lorsque le live commence"}
+        </button>
+      </div>
+    </form>
+  );
+};

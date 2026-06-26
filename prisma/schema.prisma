@@ -40,10 +40,12 @@ model User {
 // ==========================================
 enum LiveStatus {
   DRAFT
+  SCHEDULED
   ACTIVE
   INACTIVE
   ENDED
   SOLD_OUT
+  ARCHIVED
 }
 
 model LiveSession {
@@ -65,6 +67,7 @@ model LiveSession {
   interests   ProductInterest[]
   reservations Reservation[]
   auditLogs   AuditLog[]
+  notifications LiveNotification[]
 
   @@index([slug])
   @@index([userId, status])
@@ -172,6 +175,7 @@ model AuditLog {
   visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
   actionType    String      @map("action_type") @db.VarChar(50) // 'join', 'interest', 'reservation'
   productName   String?     @map("product_name") @db.VarChar(150)
+  details       String?     @db.Text
   createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
@@ -179,3 +183,20 @@ model AuditLog {
   @@index([liveSessionId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
+
+// ==========================================
+// 9. LiveNotification Model
+// ==========================================
+model LiveNotification {
+  id            String      @id @default(uuid()) @db.Uuid
+  liveId        String      @map("live_id") @db.Uuid
+  pseudo        String      @db.VarChar(50)
+  whatsapp      String?     @db.VarChar(30)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveId], references: [id], onDelete: Cascade)
+
+  @@index([liveId])
+  @@map("live_notifications")
+}
+
