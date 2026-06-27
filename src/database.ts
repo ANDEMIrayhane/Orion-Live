@@ -284,6 +284,144 @@ class DatabaseManager {
   }
 
   // ==========================================
+  // TYPE-SAFE PRISMA METHODS (NO RAW SQL)
+  // ==========================================
+
+  public async getUserById(id: string): Promise<User | null> {
+    this.checkConnection();
+    const u = await prisma.user.findUnique({ where: { id } });
+    return u ? mapUserToSnake(u) : null;
+  }
+
+  public async getUserByEmail(email: string): Promise<User | null> {
+    this.checkConnection();
+    const u = await prisma.user.findUnique({ where: { email } });
+    return u ? mapUserToSnake(u) : null;
+  }
+
+  public async getAllUsersForAdmin(): Promise<User[]> {
+    this.checkConnection();
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    return users.map(mapUserToSnake);
+  }
+
+  public async getProducts(userId?: string): Promise<Product[]> {
+    this.checkConnection();
+    const products = await prisma.product.findMany({
+      where: userId ? { userId } : undefined,
+      orderBy: { createdAt: 'desc' }
+    });
+    return products.map(mapProductToSnake);
+  }
+
+  public async getProductById(id: string): Promise<Product | null> {
+    this.checkConnection();
+    const p = await prisma.product.findUnique({ where: { id } });
+    return p ? mapProductToSnake(p) : null;
+  }
+
+  public async getLiveProductsByProductId(productId: string): Promise<any[]> {
+    this.checkConnection();
+    const lps = await prisma.liveProduct.findMany({ where: { productId } });
+    return lps.map(lp => ({
+      id: `${lp.liveSessionId}-${lp.productId}`,
+      live_session_id: lp.liveSessionId,
+      product_id: lp.productId,
+      created_at: lp.createdAt.toISOString()
+    }));
+  }
+
+  public async getProductsForLiveSession(liveSessionId: string): Promise<Product[]> {
+    this.checkConnection();
+    const products = await prisma.product.findMany({
+      where: {
+        lives: {
+          some: {
+            liveSessionId
+          }
+        }
+      }
+    });
+    return products.map(mapProductToSnake);
+  }
+
+  public async getLiveSessionById(id: string): Promise<LiveSession | null> {
+    this.checkConnection();
+    const ls = await prisma.liveSession.findUnique({ where: { id } });
+    return ls ? mapLiveSessionToSnake(ls) : null;
+  }
+
+  public async getLiveSessions(userId?: string): Promise<LiveSession[]> {
+    this.checkConnection();
+    const lives = await prisma.liveSession.findMany({
+      where: userId ? { userId } : undefined,
+      orderBy: { createdAt: 'desc' }
+    });
+    return lives.map(mapLiveSessionToSnake);
+  }
+
+  public async getLiveSessionBySlug(slug: string, excludeId?: string): Promise<LiveSession | null> {
+    this.checkConnection();
+    const ls = await prisma.liveSession.findFirst({
+      where: {
+        slug,
+        id: excludeId ? { not: excludeId } : undefined
+      }
+    });
+    return ls ? mapLiveSessionToSnake(ls) : null;
+  }
+
+  public async getReservationsByLiveSessionId(liveSessionId: string): Promise<Reservation[]> {
+    this.checkConnection();
+    const res = await prisma.reservation.findMany({ where: { liveSessionId } });
+    return res.map(mapReservationToSnake);
+  }
+
+  public async getProductInterestsByLiveSessionId(liveSessionId: string): Promise<ProductInterest[]> {
+    this.checkConnection();
+    const interests = await prisma.productInterest.findMany({ where: { liveSessionId } });
+    return interests.map(mapProductInterestToSnake);
+  }
+
+  public async getVisitorSessionsByLiveSessionId(liveSessionId: string): Promise<VisitorSession[]> {
+    this.checkConnection();
+    const sessions = await prisma.visitorSession.findMany({ where: { liveSessionId } });
+    return sessions.map(mapVisitorSessionToSnake);
+  }
+
+  public async getAuditLogsByLiveSessionId(liveSessionId: string, limit: number = 50): Promise<AuditLog[]> {
+    this.checkConnection();
+    const logs = await prisma.auditLog.findMany({
+      where: { liveSessionId },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+    return logs.map(mapAuditLogToSnake);
+  }
+
+  public async getLiveNotificationsByLiveId(liveId: string): Promise<LiveNotification[]> {
+    this.checkConnection();
+    const notifs = await prisma.liveNotification.findMany({ where: { liveId } });
+    return notifs.map(mapLiveNotificationToSnake);
+  }
+
+  public async insertAuditLog(log: Omit<AuditLog, 'id' | 'created_at'>): Promise<AuditLog> {
+    this.checkConnection();
+    const a = await prisma.auditLog.create({
+      data: {
+        liveSessionId: log.live_session_id,
+        visitorPseudo: log.visitor_pseudo,
+        actionType: log.action_type,
+        productName: log.product_name || null,
+        details: log.details
+      }
+    });
+    return mapAuditLogToSnake(a);
+  }
+
+  // ==========================================
   // TRANSACTION STABLE WRITE METHODS
   // ==========================================
 
@@ -408,7 +546,7 @@ class DatabaseManager {
   }
 
   // ==========================================
-  // ATOMIC CONCURRENCY-SAFE RESERVATION (FOR UPDATE)
+  // ATOMIC CONCURRENCY-SAFE RESERVATION (FOR UPDATE - 100% PRISMA)
   // ==========================================
 
   public async executeAtomicReservation(
@@ -418,15 +556,13 @@ class DatabaseManager {
     liveSessionId: string
   ): Promise<Reservation> {
     const result = await prisma.$transaction(async (tx: any) => {
-      // 1. SELECT FOR UPDATE to acquire exclusive row-level lock on the product
-      const products: any[] = await tx.$queryRawUnsafe(
-        `SELECT id, name, description, price, stock, is_active as "isActive", user_id as "userId" FROM products WHERE id = $1::uuid FOR UPDATE`,
-        productId
-      );
-      if (products.length === 0) {
+      // 1. Fetch the product inside transaction cleanly
+      const product = await tx.product.findUnique({
+        where: { id: productId }
+      });
+      if (!product) {
         throw new Error('Produit inexistant.');
       }
-      const product = products[0];
       if (!product.isActive) {
         throw new Error('Ce produit est actuellement inactif.');
       }
@@ -437,7 +573,7 @@ class DatabaseManager {
       // 2. Safely decrement stock
       await tx.product.update({
         where: { id: productId },
-        data: { stock: product.stock - 1 }
+        data: { stock: { decrement: 1 } }
       });
 
       // 3. Create the Reservation record
@@ -529,12 +665,20 @@ class DatabaseManager {
     });
     const totalReservations = await prisma.reservation.count();
 
-    const earningRes: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COALESCE(SUM(p.price * r.quantity), 0) as total_sales
-      FROM reservations r
-      JOIN products p ON r.product_id = p.id
-    `);
-    const totalSales = earningRes.length > 0 ? Number(earningRes[0].total_sales) : 0;
+    const reservations = await prisma.reservation.findMany({
+      select: {
+        quantity: true,
+        product: {
+          select: {
+            price: true
+          }
+        }
+      }
+    });
+    const totalSales = reservations.reduce((sum: number, r: any) => {
+      const price = r.product ? Number(r.product.price) : 0;
+      return sum + (price * r.quantity);
+    }, 0);
 
     return {
       sellersCount,
@@ -546,35 +690,69 @@ class DatabaseManager {
   }
 
   public async getSellerStats(userId: string): Promise<any> {
-    const totalRes: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(*), COALESCE(SUM(p.price * r.quantity), 0) as total_earnings
-      FROM reservations r
-      JOIN products p ON r.product_id = p.id
-      WHERE r.live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
-    `, userId);
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        liveSession: {
+          userId: userId
+        }
+      },
+      select: {
+        quantity: true,
+        product: {
+          select: {
+            price: true
+          }
+        }
+      }
+    });
+    const totalReservationsCount = reservations.length;
+    const totalEarnings = reservations.reduce((sum: number, r: any) => {
+      const price = r.product ? Number(r.product.price) : 0;
+      return sum + (price * r.quantity);
+    }, 0);
 
-    const totalInt: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(*) FROM product_interests
-      WHERE live_session_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
-    `, userId);
+    const totalInterestsCount = await prisma.productInterest.count({
+      where: {
+        liveSession: {
+          userId: userId
+        }
+      }
+    });
 
-    const preRegRes: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(*) FROM live_notifications
-      WHERE live_id IN (SELECT id FROM live_sessions WHERE user_id = $1::uuid)
-    `, userId);
+    const preRegistrationsCount = await prisma.liveNotification.count({
+      where: {
+        liveSession: {
+          userId: userId
+        }
+      }
+    });
 
-    const preVisitorsRes: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(*) FROM visitor_sessions vs
-      JOIN live_sessions ls ON vs.live_session_id = ls.id
-      WHERE ls.user_id = $1::uuid AND vs.joined_at < ls.start_date
-    `, userId);
+    const visitorSessions = await prisma.visitorSession.findMany({
+      where: {
+        liveSession: {
+          userId: userId
+        }
+      },
+      select: {
+        joinedAt: true,
+        liveSession: {
+          select: {
+            startDate: true
+          }
+        }
+      }
+    });
+    const preVisitorsCount = visitorSessions.filter((vs: any) => {
+      if (!vs.liveSession?.startDate) return false;
+      return new Date(vs.joinedAt).getTime() < new Date(vs.liveSession.startDate).getTime();
+    }).length;
 
     return {
-      totalReservationsCount: totalRes.length > 0 ? parseInt(totalRes[0].count || '0') : 0,
-      totalEarnings: totalRes.length > 0 ? Number(totalRes[0].total_earnings || '0') : 0,
-      totalInterestsCount: totalInt.length > 0 ? parseInt(totalInt[0].count || '0') : 0,
-      preRegistrationsCount: preRegRes.length > 0 ? parseInt(preRegRes[0].count || '0') : 0,
-      preVisitorsCount: preVisitorsRes.length > 0 ? parseInt(preVisitorsRes[0].count || '0') : 0
+      totalReservationsCount,
+      totalEarnings,
+      totalInterestsCount,
+      preRegistrationsCount,
+      preVisitorsCount
     };
   }
 

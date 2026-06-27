@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import cookieParser from 'cookie-parser';
-import { db, dbConnectionError } from './src/database';
+import { db, dbConnectionError, prisma } from './src/database';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import path from 'path';
@@ -108,13 +108,12 @@ async function startServer() {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
-      const users = await db.query("SELECT * FROM users WHERE id = $1", [decoded.id]);
-      if (users.length === 0) {
-        res.clearCookie('orion_session');
+      const user = await db.getUserById(decoded.id);
+      if (!user) {
+        res.clearCookie('orion_session', { httpOnly: true, secure: true, sameSite: 'none' });
         return res.status(401).json({ error: "Utilisateur inexistant" });
       }
 
-      const user = users[0];
       req.user = {
         id: user.id,
         email: user.email,
@@ -123,7 +122,7 @@ async function startServer() {
       };
       next();
     } catch (err) {
-      res.clearCookie('orion_session');
+      res.clearCookie('orion_session', { httpOnly: true, secure: true, sameSite: 'none' });
       return res.status(401).json({ error: "Session expirée ou invalide" });
     }
   };
@@ -151,8 +150,8 @@ async function startServer() {
     const assignedRole = (role === 'ADMIN' || role === 'SELLER') ? role : 'SELLER';
 
     try {
-      const existing = await db.query("SELECT * FROM users WHERE email = $1", [email]);
-      if (existing.length > 0) {
+      const existing = await db.getUserByEmail(email);
+      if (existing) {
         return res.status(400).json({ error: "Cet email est déjà enregistré." });
       }
 
@@ -180,12 +179,11 @@ async function startServer() {
     }
 
     try {
-      const users = await db.query("SELECT * FROM users WHERE email = $1", [email]);
-      if (users.length === 0) {
+      const user = await db.getUserByEmail(email);
+      if (!user) {
         return res.status(400).json({ error: "Identifiants incorrects." });
       }
 
-      const user = users[0];
       const match = bcrypt.compareSync(password, user.password_hash);
       if (!match) {
         return res.status(400).json({ error: "Identifiants incorrects." });
@@ -195,8 +193,8 @@ async function startServer() {
       
       res.cookie('orion_session', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 24 * 60 * 60 * 1000 // 1 day
       });
 
@@ -210,7 +208,7 @@ async function startServer() {
   });
 
   app.post('/api/auth/logout', (req: Request, res: Response) => {
-    res.clearCookie('orion_session');
+    res.clearCookie('orion_session', { httpOnly: true, secure: true, sameSite: 'none' });
     return res.json({ success: true });
   });
 
@@ -222,12 +220,11 @@ async function startServer() {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
-      const users = await db.query("SELECT * FROM users WHERE id = $1", [decoded.id]);
-      if (users.length === 0) {
+      const user = await db.getUserById(decoded.id);
+      if (!user) {
         return res.status(401).json({ authenticated: false, error: "Utilisateur inexistant" });
       }
 
-      const user = users[0];
       return res.json({
         authenticated: true,
         user: {
@@ -238,7 +235,7 @@ async function startServer() {
         }
       });
     } catch (err) {
-      res.clearCookie('orion_session');
+      res.clearCookie('orion_session', { httpOnly: true, secure: true, sameSite: 'none' });
       return res.status(401).json({ authenticated: false, error: "Session expirée" });
     }
   });
@@ -250,9 +247,9 @@ async function startServer() {
     try {
       let products;
       if (req.user?.role === 'ADMIN') {
-        products = await db.query("SELECT * FROM products");
+        products = await db.getProducts();
       } else {
-        products = await db.query("SELECT * FROM products WHERE user_id = $1", [req.user?.id]);
+        products = await db.getProducts(req.user?.id);
       }
       return res.json(products);
     } catch (e) {
@@ -288,9 +285,9 @@ async function startServer() {
 
     try {
       // Check ownership
-      const existing = await db.query("SELECT * FROM products WHERE id = $1", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Produit non trouvé" });
-      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+      const existing = await db.getProductById(id);
+      if (!existing) return res.status(404).json({ error: "Produit non trouvé" });
+      if (req.user?.role !== 'ADMIN' && existing.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Action non autorisée" });
       }
 
@@ -305,20 +302,16 @@ async function startServer() {
       const product = await db.updateProduct(id, updates);
 
       // Recheck linked active live sessions to see if they should toggle to SOLD_OUT or ACTIVE
-      const linkedLps = await db.query("SELECT * FROM live_products WHERE product_id = $1", [id]);
+      const linkedLps = await db.getLiveProductsByProductId(id);
       for (const lp of linkedLps) {
         const liveId = lp.live_session_id;
-        const linkedProducts = await db.query(`
-          SELECT p.* FROM products p
-          JOIN live_products lp ON p.id = lp.product_id
-          WHERE lp.live_session_id = $1
-        `, [liveId]);
+        const linkedProducts = await db.getProductsForLiveSession(liveId);
 
         const allSoldOut = linkedProducts.every((p: any) => p.stock <= 0);
-        const liveSession = await db.query("SELECT * FROM live_sessions WHERE id = $1", [liveId]);
-        if (liveSession.length > 0 && (liveSession[0].status === 'ACTIVE' || liveSession[0].status === 'SOLD_OUT')) {
+        const liveSession = await db.getLiveSessionById(liveId);
+        if (liveSession && (liveSession.status === 'ACTIVE' || liveSession.status === 'SOLD_OUT')) {
           const newStatus = allSoldOut ? 'SOLD_OUT' : 'ACTIVE';
-          if (liveSession[0].status !== newStatus) {
+          if (liveSession.status !== newStatus) {
             await db.updateLiveSession(liveId, { status: newStatus });
           }
         }
@@ -333,9 +326,9 @@ async function startServer() {
   app.delete('/api/products/:id', requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-      const existing = await db.query("SELECT * FROM products WHERE id = $1", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Produit non trouvé" });
-      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+      const existing = await db.getProductById(id);
+      if (!existing) return res.status(404).json({ error: "Produit non trouvé" });
+      if (req.user?.role !== 'ADMIN' && existing.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Action non autorisée" });
       }
 
@@ -354,9 +347,9 @@ async function startServer() {
       await autoCheckDates();
       let lives;
       if (req.user?.role === 'ADMIN') {
-        lives = await db.query("SELECT * FROM live_sessions");
+        lives = await db.getLiveSessions();
       } else {
-        lives = await db.query("SELECT * FROM live_sessions WHERE user_id = $1", [req.user?.id]);
+        lives = await db.getLiveSessions(req.user?.id);
       }
       return res.json(lives);
     } catch (e) {
@@ -382,8 +375,8 @@ async function startServer() {
     }
 
     try {
-      const existingSlug = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (existingSlug.length > 0) {
+      const existingSlug = await db.getLiveSessionBySlug(slug);
+      if (existingSlug) {
         return res.status(400).json({ error: "Le slug de boutique saisi est déjà utilisé pour un autre live." });
       }
 
@@ -413,15 +406,15 @@ async function startServer() {
     const { title, description, image_url, status, slug, start_date, end_date, product_ids } = req.body;
 
     try {
-      const existing = await db.query("SELECT * FROM live_sessions WHERE id = $1", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Session live non trouvée." });
-      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+      const existing = await db.getLiveSessionById(id);
+      if (!existing) return res.status(404).json({ error: "Session live non trouvée." });
+      if (req.user?.role !== 'ADMIN' && existing.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Action non autorisée" });
       }
 
       // Verify 24h duration limit if dates are updated
-      const finalStart = start_date || existing[0].start_date;
-      const finalEnd = end_date || existing[0].end_date;
+      const finalStart = start_date || existing.start_date;
+      const finalEnd = end_date || existing.end_date;
       const start = new Date(finalStart).getTime();
       const end = new Date(finalEnd).getTime();
       const durationMs = end - start;
@@ -432,9 +425,9 @@ async function startServer() {
         return res.status(400).json({ error: "La date de fin doit être postérieure à la date de début." });
       }
 
-      if (slug && slug !== existing[0].slug) {
-        const existingSlug = await db.query("SELECT * FROM live_sessions WHERE slug = $1 AND id != $2", [slug, id]);
-        if (existingSlug.length > 0) {
+      if (slug && slug !== existing.slug) {
+        const existingSlug = await db.getLiveSessionBySlug(slug, id);
+        if (existingSlug) {
           return res.status(400).json({ error: "Ce slug est déjà utilisé par un autre live." });
         }
       }
@@ -463,9 +456,9 @@ async function startServer() {
   app.delete('/api/lives/:id', requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-      const existing = await db.query("SELECT * FROM live_sessions WHERE id = $1", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Live non trouvé" });
-      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+      const existing = await db.getLiveSessionById(id);
+      if (!existing) return res.status(404).json({ error: "Live non trouvé" });
+      if (req.user?.role !== 'ADMIN' && existing.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Action non autorisée" });
       }
 
@@ -479,22 +472,22 @@ async function startServer() {
   app.get('/api/lives/:id/analytics', requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-      const live = await db.query("SELECT * FROM live_sessions WHERE id = $1", [id]);
-      if (live.length === 0) return res.status(404).json({ error: "Live non trouvé" });
-      if (req.user?.role !== 'ADMIN' && live[0].user_id !== req.user?.id) {
+      const live = await db.getLiveSessionById(id);
+      if (!live) return res.status(404).json({ error: "Live non trouvé" });
+      if (req.user?.role !== 'ADMIN' && live.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Non autorisé" });
       }
 
-      const reservations = await db.query("SELECT * FROM reservations WHERE live_session_id = $1", [id]);
-      const interests = await db.query("SELECT * FROM product_interests WHERE live_session_id = $1", [id]);
-      const visitorSessions = await db.query("SELECT * FROM visitor_sessions WHERE live_session_id = $1", [id]);
-      const logs = await db.query("SELECT * FROM audit_logs WHERE live_session_id = $1", [id]);
-      const notifications = await db.query("SELECT * FROM live_notifications WHERE live_id = $1", [id]);
+      const reservations = await db.getReservationsByLiveSessionId(id);
+      const interests = await db.getProductInterestsByLiveSessionId(id);
+      const visitorSessions = await db.getVisitorSessionsByLiveSessionId(id);
+      const logs = await db.getAuditLogsByLiveSessionId(id);
+      const notifications = await db.getLiveNotificationsByLiveId(id);
 
       const preRegistrationsCount = notifications.length;
 
       // Calculate visitors before start
-      const start_date = new Date(live[0].start_date).getTime();
+      const start_date = new Date(live.start_date).getTime();
       const visitorsBeforeStart = visitorSessions.filter((vs: any) => new Date(vs.joined_at).getTime() < start_date);
       const visitorsBeforeStartCount = visitorsBeforeStart.length;
 
@@ -503,7 +496,7 @@ async function startServer() {
         : 0;
 
       return res.json({
-        live: live[0],
+        live,
         reservationsCount: reservations.length,
         interestsCount: interests.length,
         uniqueVisitorsCount: visitorSessions.length,
@@ -537,16 +530,15 @@ async function startServer() {
     }
 
     try {
-      const existing = await db.query("SELECT * FROM live_sessions WHERE id = $1", [id]);
-      if (existing.length === 0) {
+      const live = await db.getLiveSessionById(id);
+      if (!live) {
         return res.status(404).json({ error: "Session live non trouvée." });
       }
 
-      if (req.user?.role !== 'ADMIN' && existing[0].user_id !== req.user?.id) {
+      if (req.user?.role !== 'ADMIN' && live.user_id !== req.user?.id) {
         return res.status(403).json({ error: "Action non autorisée" });
       }
 
-      const live = existing[0];
       if (live.status !== 'ENDED' && live.status !== 'ARCHIVED') {
         return res.status(400).json({ error: "Seuls les lives terminés peuvent être réactivés." });
       }
@@ -557,8 +549,8 @@ async function startServer() {
 
       // Update old session
       await db.updateLiveSession(live.id, { 
-        slug: archivedSlug,
-        status: 'ARCHIVED'
+         slug: archivedSlug,
+         status: 'ARCHIVED'
       });
 
       // Create new live session with original slug
@@ -574,8 +566,8 @@ async function startServer() {
       });
 
       // Fetch linked products from the old session
-      const oldProducts = await db.query("SELECT product_id FROM live_products WHERE live_session_id = $1", [live.id]);
-      const productIds = oldProducts.map((p: any) => p.product_id);
+      const oldProducts = await db.getProductsForLiveSession(live.id);
+      const productIds = oldProducts.map((p: any) => p.id);
       if (productIds.length > 0) {
         await db.syncLiveProducts(newLive.id, productIds);
       }
@@ -593,23 +585,18 @@ async function startServer() {
     const { slug } = req.params;
     try {
       await autoCheckDates();
-      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (lives.length === 0) {
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) {
         return res.status(404).json({ error: "La boutique de vente en direct demandée n'existe pas ou est introuvable." });
       }
 
-      const live = lives[0];
-
       // Grab products
-      const products = await db.query(`
-        SELECT p.* FROM products p
-        JOIN live_products lp ON p.id = lp.product_id
-        WHERE lp.live_session_id = $1 AND p.is_active = true
-      `, [live.id]);
+      const products = await db.getProductsForLiveSession(live.id);
+      const activeProducts = products.filter(p => p.is_active);
 
       // Recheck/Update sold out status if it changed (only for ACTIVE/SOLD_OUT status)
       if (live.status === 'ACTIVE' || live.status === 'SOLD_OUT') {
-        const allSoldOut = products.length > 0 && products.every((p: any) => p.stock <= 0);
+        const allSoldOut = activeProducts.length > 0 && activeProducts.every((p: any) => p.stock <= 0);
         if (allSoldOut && live.status === 'ACTIVE') {
           live.status = 'SOLD_OUT';
           await db.updateLiveSession(live.id, { status: 'SOLD_OUT' });
@@ -620,18 +607,18 @@ async function startServer() {
       }
 
       // Grab dynamic activities/logs for live comments simulation
-      const logs = await db.query("SELECT * FROM audit_logs WHERE live_session_id = $1 ORDER BY created_at DESC LIMIT 50", [live.id]);
+      const logs = await db.getAuditLogsByLiveSessionId(live.id);
 
       // Grab pre-registration details if scheduled
       let preRegistrationsCount = 0;
       if (live.status === 'SCHEDULED') {
-        const notifs = await db.query("SELECT * FROM live_notifications WHERE live_id = $1", [live.id]);
+        const notifs = await db.getLiveNotificationsByLiveId(live.id);
         preRegistrationsCount = notifs.length;
       }
 
       return res.json({
         live,
-        products,
+        products: activeProducts,
         logs,
         preRegistrationsCount
       });
@@ -646,10 +633,9 @@ async function startServer() {
     if (!pseudo) return res.status(400).json({ error: "Un pseudo est requis." });
 
     try {
-      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (lives.length === 0) return res.status(404).json({ error: "Live introuvable" });
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) return res.status(404).json({ error: "Live introuvable" });
 
-      const live = lives[0];
       await db.recordJoin(pseudo, whatsapp, live.id);
 
       return res.json({ success: true, message: "Connexion au live enregistrée !" });
@@ -665,10 +651,9 @@ async function startServer() {
     if (!pseudo) return res.status(400).json({ error: "Un pseudo est requis." });
 
     try {
-      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (lives.length === 0) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
 
-      const live = lives[0];
       if (live.status !== 'SCHEDULED') {
         return res.status(400).json({ error: "Les inscriptions ne sont autorisées que pour les sessions programmées." });
       }
@@ -680,24 +665,12 @@ async function startServer() {
       });
 
       // Add audit log for notification registration
-      const logId = `log-${Math.random().toString(36).substr(2, 9)}`;
-      if (db.isPg) {
-        await db.query(`
-          INSERT INTO audit_logs (id, live_session_id, visitor_pseudo, action_type, details)
-          VALUES ($1, $2, $3, 'pre-register', $4)
-        `, [logId, live.id, pseudo, `S'est pré-inscrit(e) pour recevoir une alerte au lancement du live.`]);
-      } else {
-        const localData = (db as any).readLocal();
-        localData.audit_logs.push({
-          id: logId,
-          live_session_id: live.id,
-          visitor_pseudo: pseudo,
-          action_type: 'pre-register',
-          details: `S'est pré-inscrit(e) pour recevoir une alerte au lancement du live.`,
-          created_at: new Date().toISOString()
-        });
-        (db as any).writeLocal(localData);
-      }
+      await db.insertAuditLog({
+        live_session_id: live.id,
+        visitor_pseudo: pseudo,
+        action_type: 'pre-register',
+        details: `S'est pré-inscrit(e) pour recevoir une alerte au lancement du live.`
+      });
 
       return res.json({ success: true, message: "Pré-inscription validée !" });
     } catch (e: any) {
@@ -711,10 +684,10 @@ async function startServer() {
     if (!pseudo || !productId) return res.status(400).json({ error: "Paramètres manquants." });
 
     try {
-      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (lives.length === 0) return res.status(404).json({ error: "Live introuvable" });
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) return res.status(404).json({ error: "Live introuvable" });
 
-      await db.recordInterest(pseudo, productId, lives[0].id);
+      await db.recordInterest(pseudo, productId, live.id);
       return res.json({ success: true });
     } catch (e) {
       return res.status(500).json({ error: "Erreur enregistrement intérêt" });
@@ -729,10 +702,9 @@ async function startServer() {
     }
 
     try {
-      const lives = await db.query("SELECT * FROM live_sessions WHERE slug = $1", [slug]);
-      if (lives.length === 0) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
 
-      const live = lives[0];
       if (live.status !== 'ACTIVE') {
         return res.status(400).json({ error: "Les réservations ne sont autorisées que pendant une session live active." });
       }
@@ -770,7 +742,7 @@ async function startServer() {
 
   app.get('/api/admin/users', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const users = await db.query("SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC");
+      const users = await db.getAllUsersForAdmin();
       return res.json(users);
     } catch (e) {
       return res.status(500).json({ error: "Erreur utilisateurs" });
@@ -789,17 +761,10 @@ async function startServer() {
         return res.status(400).json({ error: "Vous ne pouvez pas modifier votre propre rôle administratif" });
       }
       
-      if (db.isPg) {
-        await db.query("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2", [role, id]);
-      } else {
-        const localData = (db as any).readLocal();
-        const userIdx = localData.users.findIndex((u: any) => u.id === id);
-        if (userIdx !== -1) {
-          localData.users[userIdx].role = role;
-          localData.users[userIdx].updated_at = new Date().toISOString();
-          (db as any).writeLocal(localData);
-        }
-      }
+      await prisma.user.update({
+        where: { id },
+        data: { role, updatedAt: new Date() }
+      });
 
       return res.json({ success: true });
     } catch (e) {
@@ -814,15 +779,9 @@ async function startServer() {
         return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte administrateur." });
       }
 
-      if (db.isPg) {
-        await db.query("DELETE FROM users WHERE id = $1", [id]);
-      } else {
-        const localData = (db as any).readLocal();
-        localData.users = localData.users.filter((u: any) => u.id !== id);
-        localData.live_sessions = localData.live_sessions.filter((l: any) => l.user_id !== id);
-        localData.products = localData.products.filter((p: any) => p.user_id !== id);
-        (db as any).writeLocal(localData);
-      }
+      await prisma.user.delete({
+        where: { id }
+      });
 
       return res.json({ success: true });
     } catch (e) {
