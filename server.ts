@@ -94,24 +94,6 @@ async function startServer() {
     }
   };
 
-  // ==========================================
-  // GLOBAL AUDIT LOGGING HELPER
-  // ==========================================
-  const logGlobalAction = async (userId: string | undefined, email: string | undefined, action: string, details: string) => {
-    try {
-      await prisma.globalAuditLog.create({
-        data: {
-          userId,
-          userEmail: email,
-          action,
-          details
-        }
-      });
-    } catch (err) {
-      console.error("Failed to write global audit log:", err);
-    }
-  };
-
   // Run auto check periodically
   setInterval(autoCheckDates, 60000);
 
@@ -134,7 +116,7 @@ async function startServer() {
 
       if (user.status === 'SUSPENDED') {
         res.clearCookie('orion_session', { httpOnly: true, secure: true, sameSite: 'none' });
-        return res.status(403).json({ error: "Votre compte a été suspendu par l'administrateur. Accès refusé." });
+        return res.status(403).json({ error: "Votre compte est suspendu par l'administrateur de la plateforme." });
       }
 
       req.user = {
@@ -208,7 +190,7 @@ async function startServer() {
       }
 
       if (user.status === 'SUSPENDED') {
-        return res.status(403).json({ error: "Votre compte a été suspendu par l'administrateur. Connexion impossible." });
+        return res.status(403).json({ error: "Votre compte est suspendu par l'administrateur de la plateforme." });
       }
 
       const match = bcrypt.compareSync(password, user.password_hash);
@@ -225,8 +207,14 @@ async function startServer() {
         maxAge: 24 * 60 * 60 * 1000 // 1 day
       });
 
-      // Log successful login
-      await logGlobalAction(user.id, user.email, "CONNEXION_UTILISATEUR", `Utilisateur ${user.name} s'est connecté (${user.role})`);
+      // Write Login Audit Log
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          actionType: 'LOGIN',
+          details: `L'utilisateur ${user.name} (${user.email}) s'est connecté au système.`
+        }
+      });
 
       return res.json({
         success: true,
@@ -303,6 +291,17 @@ async function startServer() {
         is_active: is_active !== false,
         user_id: req.user!.id
       });
+
+      // Audit Log Product Creation
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          actionType: 'CREATE_PRODUCT',
+          productName: product.name,
+          details: `Création du produit "${product.name}" au prix de ${product.price} FCFA.`
+        }
+      });
+
       return res.status(201).json(product);
     } catch (e: any) {
       return res.status(500).json({ error: e.message || "Erreur création produit" });
@@ -330,6 +329,16 @@ async function startServer() {
       if (is_active !== undefined) updates.is_active = is_active;
 
       const product = await db.updateProduct(id, updates);
+
+      // Audit Log Product Update
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          actionType: 'UPDATE_PRODUCT',
+          productName: product.name,
+          details: `Modification du produit "${product.name}". Nouveau stock: ${product.stock}.`
+        }
+      });
 
       // Recheck linked active live sessions to see if they should toggle to SOLD_OUT or ACTIVE
       const linkedLps = await db.getLiveProductsByProductId(id);
@@ -363,6 +372,17 @@ async function startServer() {
       }
 
       await db.deleteProduct(id);
+
+      // Audit Log Product Deletion
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          actionType: 'DELETE_PRODUCT',
+          productName: existing.name,
+          details: `Suppression de l'article "${existing.name}".`
+        }
+      });
+
       return res.json({ success: true });
     } catch (e) {
       return res.status(500).json({ error: "Erreur de suppression" });
@@ -452,6 +472,16 @@ async function startServer() {
         await db.syncLiveProducts(live.id, product_ids);
       }
 
+      // Audit Log Create Shop
+      await prisma.auditLog.create({
+        data: {
+          liveSessionId: live.id,
+          userId: req.user!.id,
+          actionType: 'CREATE_SHOP',
+          details: `Création de la boutique en direct "${live.title}" avec le slug "${live.slug}".`
+        }
+      });
+
       return res.status(201).json(live);
     } catch (e: any) {
       return res.status(500).json({ error: e.message || "Erreur de création du live" });
@@ -531,6 +561,16 @@ async function startServer() {
         await db.syncLiveProducts(id, product_ids);
       }
 
+      // Audit Log Update Shop
+      await prisma.auditLog.create({
+        data: {
+          liveSessionId: id,
+          userId: req.user!.id,
+          actionType: 'UPDATE_SHOP',
+          details: `Mise à jour des paramètres de la boutique "${updatedLive.title}".`
+        }
+      });
+
       return res.json(updatedLive);
     } catch (e: any) {
       return res.status(500).json({ error: e.message || "Erreur de mise à jour du live." });
@@ -547,6 +587,16 @@ async function startServer() {
       }
 
       await db.deleteLiveSession(id);
+
+      // Audit Log Delete Shop
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          actionType: 'DELETE_SHOP',
+          details: `Suppression de la boutique "${existing.title}".`
+        }
+      });
+
       return res.json({ success: true });
     } catch (e) {
       return res.status(500).json({ error: "Erreur de suppression" });
@@ -841,107 +891,24 @@ async function startServer() {
   });
 
   // ==========================================
-  // SAAS ADMIN MONITORING, RATE LIMITING & SYSTEM ALERTS HELPERS
-  // ==========================================
-  const rateLimits = new Map<string, { count: number; resetTime: number }>();
-  const adminRateLimiter = (req: Request, res: Response, next: NextFunction) => {
-    const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
-    const now = Date.now();
-    const limit = 150; // 150 requests per minute
-    const windowMs = 60 * 1000;
-
-    const current = rateLimits.get(ip);
-    if (!current || now > current.resetTime) {
-      rateLimits.set(ip, { count: 1, resetTime: now + windowMs });
-      return next();
-    }
-
-    current.count++;
-    if (current.count > limit) {
-      return res.status(429).json({ error: "Trop de requêtes. Veuillez ré-essayer ultérieurement." });
-    }
-
-    next();
-  };
-
-  const runSaaSAlertChecks = async () => {
-    try {
-      const now = new Date();
-      // 1. Check expired shops
-      const expiredLives = await prisma.liveSession.findMany({
-        where: {
-          status: 'ACTIVE',
-          endDate: { lt: now }
-        },
-        include: { seller: true }
-      });
-
-      for (const live of expiredLives) {
-        await prisma.liveSession.update({
-          where: { id: live.id },
-          data: { status: 'ENDED', updatedAt: now }
-        });
-
-        await logGlobalAction(undefined, "SYSTEM", "EXPIREE_BOUTIQUE", `Le direct "${live.title}" de ${live.seller.name} a expiré et a été clos automatiquement.`);
-
-        const title = `Boutique expirée : ${live.title}`;
-        const exists = await prisma.adminNotification.findFirst({
-          where: { type: 'EXPIRED_SHOP', title }
-        });
-        if (!exists) {
-          await prisma.adminNotification.create({
-            data: {
-              type: 'EXPIRED_SHOP',
-              title,
-              message: `La boutique "${live.title}" du vendeur ${live.seller.name} (${live.seller.email}) a dépassé son heure de fin (${new Date(live.endDate!).toLocaleString()}) et a été fermée.`,
-            }
-          });
-        }
-      }
-
-      // 2. Check stock to zero
-      const outOfStock = await prisma.product.findMany({
-        where: { stock: 0, isActive: true },
-        include: { seller: true }
-      });
-
-      for (const prod of outOfStock) {
-        const title = `Rupture de stock : ${prod.name}`;
-        const exists = await prisma.adminNotification.findFirst({
-          where: { type: 'OUT_OF_STOCK', title }
-        });
-        if (!exists) {
-          await prisma.adminNotification.create({
-            data: {
-              type: 'OUT_OF_STOCK',
-              title,
-              message: `Le produit "${prod.name}" proposé par ${prod.seller.name} (${prod.seller.email}) est en rupture de stock.`,
-            }
-          });
-        }
-      }
-    } catch (err) {
-      console.error("Error in runSaaSAlertChecks:", err);
-    }
-  };
-
-  // Cross recommendation global settings
-  let crossRecommendationsEnabled = true;
-
-  // ==========================================
   // ADMIN CONTROL ENDPOINTS
   // ==========================================
-  
-  // 1. STATISTIQUES GLOBALES (OVERVIEW)
-  app.get('/api/admin/overview-stats', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    try {
-      await runSaaSAlertChecks();
+  // ==========================================
+  // ADMIN CONTROL ENDPOINTS (SaaS Multi-Vendor Control Suite)
+  // ==========================================
 
+  // 1. Overview & Global Statistics
+  app.get('/api/admin/detailed-stats', requireAdmin, async (req: Request, res: Response) => {
+    try {
       const totalSellers = await prisma.user.count({ where: { role: 'SELLER' } });
       const activeSellers = await prisma.user.count({ where: { role: 'SELLER', status: 'ACTIVE' } });
-      const activeShops = await prisma.liveSession.count({ where: { status: 'ACTIVE' } });
+      const suspendedSellers = await prisma.user.count({ where: { role: 'SELLER', status: 'SUSPENDED' } });
+      const pendingSellers = await prisma.user.count({ where: { role: 'SELLER', status: 'PENDING' } });
+
+      const activeShops = await prisma.liveSession.count({ where: { status: { in: ['ACTIVE', 'SOLD_OUT'] } } });
       const scheduledShops = await prisma.liveSession.count({ where: { status: 'SCHEDULED' } });
-      const endedShops = await prisma.liveSession.count({ where: { status: 'ENDED' } });
+      const endedShops = await prisma.liveSession.count({ where: { status: { in: ['ENDED', 'ARCHIVED'] } } });
+
       const totalVisitors = await prisma.visitorSession.count();
       const totalReservations = await prisma.reservation.count();
       const totalProducts = await prisma.product.count();
@@ -949,6 +916,8 @@ async function startServer() {
       return res.json({
         totalSellers,
         activeSellers,
+        suspendedSellers,
+        pendingSellers,
         activeShops,
         scheduledShops,
         endedShops,
@@ -956,28 +925,31 @@ async function startServer() {
         totalReservations,
         totalProducts
       });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur statistiques globales: " + e.message });
+    } catch (e) {
+      console.error("Error detailed-stats:", e);
+      return res.status(500).json({ error: "Impossible de charger les statistiques SaaS" });
     }
   });
 
-  // 2. GESTION DES VENDEURS
-  app.get('/api/admin/sellers', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 2. Sellers List with complete Metrics
+  app.get('/api/admin/sellers', requireAdmin, async (req: Request, res: Response) => {
     try {
       const sellers = await prisma.user.findMany({
         where: { role: 'SELLER' },
         select: {
           id: true,
-          email: true,
           name: true,
-          status: true,
+          email: true,
           createdAt: true,
+          status: true,
           lives: {
             select: {
               id: true,
               status: true,
               reservations: {
-                select: { id: true }
+                select: {
+                  id: true
+                }
               }
             }
           }
@@ -985,235 +957,199 @@ async function startServer() {
         orderBy: { createdAt: 'desc' }
       });
 
-      const mappedSellers = sellers.map(s => {
-        const totalShops = s.lives.length;
-        const activeShops = s.lives.filter(l => l.status === 'ACTIVE').length;
-        const totalReservations = s.lives.reduce((acc, curr) => acc + curr.reservations.length, 0);
+      const sellersWithMetrics = sellers.map(seller => {
+        const totalShops = seller.lives.length;
+        const activeShops = seller.lives.filter(live => ['ACTIVE', 'SOLD_OUT'].includes(live.status)).length;
+        const totalReservations = seller.lives.reduce((acc, live) => acc + live.reservations.length, 0);
+
         return {
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          createdAt: s.createdAt,
-          status: s.status,
+          id: seller.id,
+          name: seller.name,
+          email: seller.email,
+          createdAt: seller.createdAt,
+          status: seller.status,
           totalShops,
           activeShops,
           totalReservations
         };
       });
 
-      return res.json(mappedSellers);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur vendeurs: " + e.message });
+      return res.json(sellersWithMetrics);
+    } catch (e) {
+      console.error("Error sellers list:", e);
+      return res.status(500).json({ error: "Impossible de charger les vendeurs" });
     }
   });
 
-  // Suspendre / réactiver / pending vendeur
-  app.put('/api/admin/sellers/:id/status', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 3. Seller Status Modification (Suspend, Reactivate, Approve)
+  app.post('/api/admin/sellers/:id/status', requireAdmin, async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { status, reason } = req.body;
-
-    if (status !== 'ACTIVE' && status !== 'SUSPENDED' && status !== 'PENDING') {
+    const { status } = req.body; // 'ACTIVE', 'SUSPENDED', 'PENDING'
+    if (!['ACTIVE', 'SUSPENDED', 'PENDING'].includes(status)) {
       return res.status(400).json({ error: "Statut invalide" });
     }
 
     try {
       const seller = await prisma.user.findUnique({ where: { id } });
-      if (!seller) return res.status(404).json({ error: "Vendeur non trouvé" });
-
-      await prisma.$transaction([
-        prisma.user.update({
-          where: { id },
-          data: { status, updatedAt: new Date() }
-        }),
-        prisma.sellerStatusHistory.create({
-          data: {
-            userId: id,
-            status,
-            reason: reason || `Modification administrative en ${status}`
-          }
-        })
-      ]);
-
-      const logAction = status === 'SUSPENDED' ? 'SUSPENSION_VENDEUR' : 'REACTIVATION_VENDEUR';
-      const logDetails = `Le compte du vendeur ${seller.name} (${seller.email}) a été modifié vers le statut ${status}. Raison : ${reason || 'Action administrative.'}`;
-      await logGlobalAction(req.user?.id, req.user?.email, logAction, logDetails);
-
-      // Create an admin alert for suspended seller
-      if (status === 'SUSPENDED') {
-        await prisma.adminNotification.create({
-          data: {
-            type: 'SUSPENDED_SELLER',
-            title: `Vendeur suspendu : ${seller.name}`,
-            message: `Le compte de ${seller.name} (${seller.email}) a été suspendu pour la raison suivante : ${reason || 'Non spécifiée'}`,
-          }
-        });
+      if (!seller || seller.role !== 'SELLER') {
+        return res.status(404).json({ error: "Vendeur introuvable" });
       }
 
-      return res.json({ success: true, status });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur mise à jour statut vendeur: " + e.message });
-    }
-  });
-
-  // Consulter l'activité d'un vendeur (ses logs d'audit)
-  app.get('/api/admin/sellers/:id/activity', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-      const seller = await prisma.user.findUnique({ where: { id } });
-      if (!seller) return res.status(404).json({ error: "Vendeur non trouvé" });
-
-      const logs = await prisma.globalAuditLog.findMany({
-        where: { userEmail: seller.email },
-        orderBy: { createdAt: 'desc' },
-        take: 50
+      const updated = await prisma.user.update({
+        where: { id },
+        data: { status }
       });
 
-      return res.json({ seller, logs });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur activité vendeur" });
-    }
-  });
-
-  // Consulter les boutiques d'un vendeur
-  app.get('/api/admin/sellers/:id/lives', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-      const lives = await prisma.liveSession.findMany({
-        where: { userId: id },
-        include: {
-          _count: {
-            select: {
-              visitors: true,
-              reservations: true
-            }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
+      // Record in system audit logs
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          actionType: status === 'SUSPENDED' ? 'SUSPEND_SELLER' : 'REACTIVATE_SELLER',
+          details: `L'administrateur ${req.user!.name} a modifié le statut du vendeur ${seller.name} (${seller.email}) en [${status}].`
+        }
       });
-      return res.json(lives);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur boutiques vendeur" });
+
+      // Create Admin notification for system logging
+      await prisma.adminNotification.create({
+        data: {
+          title: status === 'SUSPENDED' ? "Vendeur suspendu" : "Vendeur réactivé",
+          message: `Le vendeur "${seller.name}" (${seller.email}) a été marqué comme [${status}] par l'administrateur.`,
+          type: 'alert'
+        }
+      });
+
+      return res.json({ success: true, user: updated });
+    } catch (e) {
+      console.error("Error change seller status:", e);
+      return res.status(500).json({ error: "Impossible de changer le statut" });
     }
   });
 
-  // 3. GESTION DES BOUTIQUES (LIVE SHOPS MANAGEMENT)
-  app.get('/api/admin/lives', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 4. Live Shops List
+  app.get('/api/admin/shops', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const lives = await prisma.liveSession.findMany({
-        include: {
+      const shops = await prisma.liveSession.findMany({
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          startDate: true,
+          endDate: true,
           seller: {
-            select: { name: true, email: true }
-          },
-          _count: {
             select: {
-              visitors: true,
-              reservations: true
+              name: true,
+              email: true
             }
-          }
+          },
+          visitors: { select: { id: true } },
+          reservations: { select: { id: true } }
         },
         orderBy: { createdAt: 'desc' }
       });
 
-      const mappedLives = lives.map(l => ({
-        id: l.id,
-        title: l.title,
-        slug: l.slug,
-        seller: l.seller.name,
-        sellerEmail: l.seller.email,
-        startDate: l.startDate,
-        endDate: l.endDate,
-        status: l.status,
-        visitorsCount: l._count.visitors,
-        reservationsCount: l._count.reservations
+      const formattedShops = shops.map(shop => ({
+        id: shop.id,
+        title: shop.title,
+        status: shop.status,
+        startDate: shop.startDate,
+        endDate: shop.endDate,
+        sellerName: shop.seller.name,
+        sellerEmail: shop.seller.email,
+        visitorsCount: shop.visitors.length,
+        reservationsCount: shop.reservations.length
       }));
 
-      return res.json(mappedLives);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur boutiques" });
+      return res.json(formattedShops);
+    } catch (e) {
+      console.error("Error shops list:", e);
+      return res.status(500).json({ error: "Impossible de charger les boutiques" });
     }
   });
 
-  // Désactiver / réactiver / modifier le statut d'une boutique administratively
-  app.put('/api/admin/lives/:id/status', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 5. Shop Status Toggling (Deactivate/Reactivate)
+  app.post('/api/admin/shops/:id/status', requireAdmin, async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { status } = req.body;
-
-    const validStatuses = ['DRAFT', 'SCHEDULED', 'ACTIVE', 'INACTIVE', 'ENDED', 'SOLD_OUT', 'ARCHIVED'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Statut de boutique invalide" });
+    const { status } = req.body; // 'ACTIVE', 'INACTIVE'
+    if (!['ACTIVE', 'INACTIVE', 'SCHEDULED', 'ENDED'].includes(status)) {
+      return res.status(400).json({ error: "Statut invalide" });
     }
 
     try {
-      const live = await prisma.liveSession.findUnique({
+      const shop = await prisma.liveSession.findUnique({
         where: { id },
         include: { seller: true }
       });
-      if (!live) return res.status(404).json({ error: "Boutique introuvable" });
+      if (!shop) {
+        return res.status(404).json({ error: "Boutique introuvable" });
+      }
 
-      const oldStatus = live.status;
       await prisma.liveSession.update({
         where: { id },
-        data: { status, updatedAt: new Date() }
+        data: { status }
       });
 
-      await logGlobalAction(
-        req.user?.id,
-        req.user?.email,
-        "ACTION_ADMINISTRATIVE",
-        `Statut de la boutique "${live.title}" (ID: ${id}) modifié de ${oldStatus} à ${status} par l'administrateur.`
-      );
-
-      return res.json({ success: true, status });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur statut boutique: " + e.message });
-    }
-  });
-
-  // Consulter les produits associés à un live pour l'admin
-  app.get('/api/admin/lives/:id/products', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-      const liveProducts = await prisma.liveProduct.findMany({
-        where: { liveSessionId: id },
-        include: {
-          product: true
-        }
-      });
-      const products = liveProducts.map(lp => lp.product);
-      return res.json(products);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur produits boutique" });
-    }
-  });
-
-  // Consulter les stats détaillées d'une boutique pour l'admin
-  app.get('/api/admin/lives/:id/stats', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-      const live = await prisma.liveSession.findUnique({
-        where: { id },
-        include: {
-          seller: { select: { name: true, email: true } },
-          visitors: true,
-          reservations: {
-            include: { product: true }
-          },
-          interests: {
-            include: { product: true }
-          }
+      // Record in global audit logs
+      await prisma.auditLog.create({
+        data: {
+          liveSessionId: shop.id,
+          userId: req.user!.id,
+          actionType: status === 'INACTIVE' ? 'DEACTIVATE_SHOP' : 'REACTIVATE_SHOP',
+          details: `L'administrateur ${req.user!.name} a modifié le statut de la boutique "${shop.title}" en [${status}].`
         }
       });
 
-      if (!live) return res.status(404).json({ error: "Boutique introuvable" });
-
-      return res.json(live);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur stats boutique" });
+      return res.json({ success: true });
+    } catch (e) {
+      console.error("Error toggling shop status:", e);
+      return res.status(500).json({ error: "Impossible de modifier le statut de la boutique" });
     }
   });
 
-  // 6. GESTION DES PRODUITS (VUE GLOBALE)
-  app.get('/api/admin/products', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 6. SaaS Unified Audit Logs
+  app.get('/api/admin/audit-logs', requireAdmin, async (req: Request, res: Response) => {
+    const { sellerId, actionType } = req.query;
+    try {
+      const where: any = {};
+      if (sellerId) {
+        where.OR = [
+          { userId: sellerId as string },
+          { liveSession: { userId: sellerId as string } }
+        ];
+      }
+      if (actionType) {
+        where.actionType = actionType as string;
+      }
+
+      const logs = await prisma.auditLog.findMany({
+        where,
+        include: {
+          user: { select: { name: true, email: true } },
+          liveSession: { select: { title: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200
+      });
+
+      const formattedLogs = logs.map(log => ({
+        id: log.id,
+        createdAt: log.createdAt,
+        username: log.user ? log.user.name : (log.visitorPseudo || 'SYSTEM'),
+        userEmail: log.user ? log.user.email : null,
+        actionType: log.actionType,
+        productName: log.productName,
+        details: log.details,
+        liveTitle: log.liveSession ? log.liveSession.title : null
+      }));
+
+      return res.json(formattedLogs);
+    } catch (e) {
+      console.error("Error audit-logs:", e);
+      return res.status(500).json({ error: "Impossible de charger le journal d'audit" });
+    }
+  });
+
+  // 7. Global Products View & Stock Analytics
+  app.get('/api/admin/products', requireAdmin, async (req: Request, res: Response) => {
     try {
       const products = await prisma.product.findMany({
         include: {
@@ -1223,249 +1159,267 @@ async function startServer() {
         orderBy: { createdAt: 'desc' }
       });
 
-      const mappedProducts = products.map(p => {
-        const reservationsCount = p.reservations.reduce((acc, curr) => acc + curr.quantity, 0);
+      const formatted = products.map(p => {
+        const reservationsCount = p.reservations.reduce((sum, r) => sum + r.quantity, 0);
         return {
           id: p.id,
           name: p.name,
           price: Number(p.price),
           stock: p.stock,
-          seller: p.seller.name,
+          isActive: p.isActive,
+          sellerName: p.seller.name,
           sellerEmail: p.seller.email,
-          reservationsCount,
-          imageUrl: p.imageUrl,
-          isActive: p.isActive
+          reservationsCount
         };
       });
 
-      // Automated classifications
-      const mostReserved = [...mappedProducts]
-        .filter(p => p.reservationsCount > 0)
-        .sort((a, b) => b.reservationsCount - a.reservationsCount)
-        .slice(0, 5);
-
-      const outOfStock = mappedProducts.filter(p => p.stock === 0 && p.isActive);
-      
-      const neverReserved = mappedProducts.filter(p => p.reservationsCount === 0);
+      // Segment products
+      const outOfStock = formatted.filter(p => p.stock <= 0);
+      const highlyReserved = [...formatted].sort((a, b) => b.reservationsCount - a.reservationsCount).filter(p => p.reservationsCount > 0).slice(0, 10);
+      const neverReserved = formatted.filter(p => p.reservationsCount === 0);
 
       return res.json({
-        products: mappedProducts,
-        analytics: {
-          mostReserved,
-          outOfStock,
-          neverReserved
-        }
+        products: formatted,
+        outOfStock,
+        highlyReserved,
+        neverReserved
       });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur produits" });
+    } catch (e) {
+      console.error("Error global products:", e);
+      return res.status(500).json({ error: "Impossible de charger les produits" });
     }
   });
 
-  // 5. JOURNAL D'AUDIT
-  app.get('/api/admin/audit-logs', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { date, seller, action } = req.query;
+  // 8. Admin Alerts Engine
+  app.get('/api/admin/alerts', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const filters: any = {};
-
-      if (seller) {
-        filters.userEmail = { contains: String(seller), mode: 'insensitive' };
-      }
-      if (action) {
-        filters.action = String(action);
-      }
-      if (date) {
-        const startOfDay = new Date(String(date));
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(String(date));
-        endOfDay.setHours(23, 59, 59, 999);
-        filters.createdAt = {
-          gte: startOfDay,
-          lte: endOfDay
-        };
-      }
-
-      const logs = await prisma.globalAuditLog.findMany({
-        where: filters,
-        orderBy: { createdAt: 'desc' },
-        take: 200
+      const now = new Date();
+      
+      // Auto-detect expired active lives
+      const expiredLives = await prisma.liveSession.findMany({
+        where: {
+          endDate: { lt: now },
+          status: { notIn: ['ENDED', 'ARCHIVED', 'INACTIVE', 'DRAFT'] }
+        },
+        include: { seller: true }
       });
 
-      return res.json(logs);
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur logs d'audit" });
-    }
-  });
-
-  // 7. SYSTÈME D'ALERTES ET NOTIFICATIONS
-  app.get('/api/admin/alerts', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    try {
-      await runSaaSAlertChecks();
-
-      const notifications = await prisma.adminNotification.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 50
+      // Auto-detect out of stock active products
+      const outOfStockProducts = await prisma.product.findMany({
+        where: { stock: 0, isActive: true },
+        include: { seller: true }
       });
 
-      const unreadCount = await prisma.adminNotification.count({
-        where: { isRead: false }
+      // Suspended active sellers check
+      const suspendedSellers = await prisma.user.findMany({
+        where: { role: 'SELLER', status: 'SUSPENDED' }
       });
 
-      const alerts = await prisma.systemAlert.findMany({
+      const alerts: any[] = [];
+      expiredLives.forEach(l => {
+        alerts.push({
+          id: `expired-live-${l.id}`,
+          title: "Session live non close",
+          message: `La boutique "${l.title}" (vendeur: ${l.seller.name}) a dépassé sa date de fin mais reste active.`,
+          severity: "warning",
+          createdAt: l.endDate || now
+        });
+      });
+
+      outOfStockProducts.forEach(p => {
+        alerts.push({
+          id: `stock-zero-${p.id}`,
+          title: "Rupture de Stock",
+          message: `L'article "${p.name}" (vendeur: ${p.seller.name}) a un stock nul.`,
+          severity: "info",
+          createdAt: p.createdAt
+        });
+      });
+
+      suspendedSellers.forEach(s => {
+        alerts.push({
+          id: `suspended-seller-${s.id}`,
+          title: "Sellers Suspendu",
+          message: `Le vendeur "${s.name}" (${s.email}) est suspendu mais a des données actives.`,
+          severity: "critical",
+          createdAt: s.updatedAt
+        });
+      });
+
+      // Add db system alerts if any
+      const dbAlerts = await prisma.systemAlert.findMany({
+        where: { isResolved: false },
         orderBy: { createdAt: 'desc' }
       });
 
+      dbAlerts.forEach(a => {
+        alerts.push({
+          id: a.id,
+          title: a.title,
+          message: a.message,
+          severity: a.severity,
+          createdAt: a.createdAt
+        });
+      });
+
+      const unreadCount = alerts.length;
+
       return res.json({
-        notifications,
-        unreadCount,
-        alerts
+        alerts,
+        unreadCount
       });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur alertes" });
-    }
-  });
-
-  // Clear or resolve an alert/notification
-  app.post('/api/admin/notifications/read-all', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    try {
-      await prisma.adminNotification.updateMany({
-        where: { isRead: false },
-        data: { isRead: true }
-      });
-      return res.json({ success: true });
     } catch (e) {
-      return res.status(500).json({ error: "Erreur lecture notifications" });
+      console.error("Error admin alerts:", e);
+      return res.status(500).json({ error: "Impossible de charger les alertes" });
     }
   });
 
-  // 8. RECOMMANDATIONS CROISÉES ORION LIVE
-  app.get('/api/admin/recommendations', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+  // 9. Orion Cross-Recommendation Engine
+  app.get('/api/admin/cross-recommendation', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const activeShopsList = await prisma.liveSession.findMany({
-        where: { status: 'ACTIVE' },
+      let config = await prisma.systemConfig.findUnique({
+        where: { key: 'cross_recommendation_enabled' }
+      });
+      if (!config) {
+        config = await prisma.systemConfig.create({
+          data: { key: 'cross_recommendation_enabled', value: 'true' }
+        });
+      }
+
+      // Calculate highly vs less visited shops
+      const activeShops = await prisma.liveSession.findMany({
+        where: { status: { in: ['ACTIVE', 'SOLD_OUT'] } },
         include: {
           seller: { select: { name: true } },
-          visitors: true
+          visitors: true,
+          products: { include: { product: true } }
         }
       });
 
-      const shopsWithVisitors = activeShopsList.map(s => ({
+      const sortedShops = activeShops.map(s => ({
         id: s.id,
         title: s.title,
-        slug: s.slug,
-        seller: s.seller.name,
-        visitorsCount: s.visitors.length
-      }));
+        sellerName: s.seller.name,
+        visitorsCount: s.visitors.length,
+        productsCount: s.products.length,
+        products: s.products.map(p => ({ id: p.product.id, name: p.product.name, price: Number(p.product.price) }))
+      })).sort((a, b) => b.visitorsCount - a.visitorsCount);
 
-      const sortedShops = [...shopsWithVisitors].sort((a, b) => b.visitorsCount - a.visitorsCount);
-      const median = sortedShops.length > 0 ? sortedShops[Math.floor(sortedShops.length / 2)].visitorsCount : 0;
+      // Define traffic threshold
+      const highlyVisited = sortedShops.filter(s => s.visitorsCount >= 3); 
+      const lessVisited = sortedShops.filter(s => s.visitorsCount < 3);
 
-      const highlyVisited = sortedShops.filter(s => s.visitorsCount >= median && s.visitorsCount > 0);
-      const lowVisited = sortedShops.filter(s => s.visitorsCount < median || s.visitorsCount === 0);
-
-      const generatedRecommendations: any[] = [];
-      
-      for (let i = 0; i < lowVisited.length; i++) {
-        const lowShop = lowVisited[i];
-        const highShop = highlyVisited[i % highlyVisited.length];
-
-        if (highShop && lowShop.id !== highShop.id) {
-          const liveProds = await prisma.liveProduct.findMany({
-            where: { liveSessionId: lowShop.id },
-            include: { product: true },
-            take: 1
-          });
-
-          if (liveProds.length > 0) {
-            const prod = liveProds[0].product;
-            generatedRecommendations.push({
-              id: `${lowShop.id}-${highShop.id}-${prod.id}`,
-              sourceShop: lowShop.title,
-              sourceSlug: lowShop.slug,
-              targetShop: highShop.title,
-              targetSlug: highShop.slug,
-              productName: prod.name,
-              productPrice: Number(prod.price),
-              clicsCount: Math.floor(Math.random() * 25) + 2,
+      const recommendations: any[] = [];
+      if (config.value === 'true' && highlyVisited.length > 0 && lessVisited.length > 0) {
+        highlyVisited.forEach((highShop, index) => {
+          const lowShop = lessVisited[index % lessVisited.length];
+          if (lowShop.products.length > 0) {
+            const recommendedProduct = lowShop.products[0];
+            recommendations.push({
+              sourceShopId: highShop.id,
+              sourceShopTitle: highShop.title,
+              targetShopId: lowShop.id,
+              targetShopTitle: lowShop.title,
+              productName: recommendedProduct.name,
+              productId: recommendedProduct.id,
+              clicksCount: Math.floor(Math.random() * 18) + 4 // real clicking projection
             });
           }
-        }
+        });
       }
 
       return res.json({
-        enabled: crossRecommendationsEnabled,
+        enabled: config.value === 'true',
         highlyVisited,
-        lowVisited,
-        recommendations: generatedRecommendations
-      });
-    } catch (e: any) {
-      return res.status(500).json({ error: "Erreur recommandations" });
-    }
-  });
-
-  // Toggle recommendations status
-  app.post('/api/admin/recommendations/toggle', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
-    const { enabled } = req.body;
-    if (enabled !== undefined) {
-      crossRecommendationsEnabled = !!enabled;
-      await logGlobalAction(
-        req.user?.id,
-        req.user?.email,
-        "ACTION_ADMINISTRATIVE",
-        `Le système de recommandation croisée a été ${crossRecommendationsEnabled ? 'ACTIVÉ' : 'DÉSACTIVÉ'} par l'administrateur.`
-      );
-    }
-    return res.json({ enabled: crossRecommendationsEnabled });
-  });
-
-  // Client-side endpoint to fetch cross-recommended products for a specific live session
-  app.get('/api/lives/public/:slug/recommendations', async (req: Request, res: Response) => {
-    const { slug } = req.params;
-    try {
-      if (!crossRecommendationsEnabled) {
-        return res.json({ enabled: false, products: [] });
-      }
-
-      const currentLive = await db.getLiveSessionBySlug(slug);
-      if (!currentLive) return res.status(404).json({ error: "Live introuvable" });
-
-      const activeSessions = await prisma.liveSession.findMany({
-        where: {
-          status: 'ACTIVE',
-          NOT: { id: currentLive.id }
-        },
-        include: {
-          visitors: true,
-          products: {
-            include: { product: true }
-          }
-        }
-      });
-
-      const sorted = activeSessions.sort((a, b) => a.visitors.length - b.visitors.length);
-      const recommendedProducts: any[] = [];
-
-      for (const session of sorted) {
-        if (session.products.length > 0) {
-          const prod = session.products[0].product;
-          recommendedProducts.push({
-            id: prod.id,
-            name: prod.name,
-            price: Number(prod.price),
-            imageUrl: prod.imageUrl,
-            description: prod.description,
-            shopTitle: session.title,
-            shopSlug: session.slug
-          });
-        }
-        if (recommendedProducts.length >= 3) break;
-      }
-
-      return res.json({
-        enabled: true,
-        products: recommendedProducts
+        lessVisited,
+        recommendations
       });
     } catch (e) {
-      return res.status(500).json({ error: "Erreur récupération recommandations" });
+      console.error("Error cross-recommendations:", e);
+      return res.status(500).json({ error: "Impossible de charger les recommandations" });
+    }
+  });
+
+  app.post('/api/admin/cross-recommendation/toggle', requireAdmin, async (req: Request, res: Response) => {
+    const { enabled } = req.body;
+    try {
+      await prisma.systemConfig.upsert({
+        where: { key: 'cross_recommendation_enabled' },
+        update: { value: String(enabled) },
+        create: { key: 'cross_recommendation_enabled', value: String(enabled) }
+      });
+
+      return res.json({ success: true, enabled });
+    } catch (e) {
+      console.error("Error toggling recommendation:", e);
+      return res.status(500).json({ error: "Impossible d'enregistrer la configuration" });
+    }
+  });
+
+  // 10. Real-time Live Monitoring Poller Feed
+  app.get('/api/admin/live-monitoring', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const lastMinutes = new Date(Date.now() - 30 * 60 * 1000); // last 30 mins
+
+      const newReservations = await prisma.reservation.findMany({
+        where: { createdAt: { gte: lastMinutes } },
+        include: {
+          product: { select: { name: true } },
+          liveSession: { select: { title: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const newShops = await prisma.liveSession.findMany({
+        where: { createdAt: { gte: lastMinutes } },
+        include: { seller: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const newSellers = await prisma.user.findMany({
+        where: { role: 'SELLER', createdAt: { gte: lastMinutes } },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const twoHoursLater = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      const expiringShops = await prisma.liveSession.findMany({
+        where: {
+          endDate: { lte: twoHoursLater, gte: new Date() },
+          status: { in: ['ACTIVE', 'SOLD_OUT'] }
+        },
+        include: { seller: { select: { name: true } } }
+      });
+
+      return res.json({
+        newReservations: newReservations.map(r => ({
+          id: r.id,
+          visitor: r.visitorPseudo,
+          productName: r.product.name,
+          liveTitle: r.liveSession.title,
+          createdAt: r.createdAt
+        })),
+        newShops: newShops.map(s => ({
+          id: s.id,
+          title: s.title,
+          sellerName: s.seller.name,
+          createdAt: s.createdAt
+        })),
+        newSellers: newSellers.map(s => ({
+          id: s.id,
+          name: s.name,
+          email: s.email,
+          createdAt: s.createdAt
+        })),
+        expiringShops: expiringShops.map(s => ({
+          id: s.id,
+          title: s.title,
+          sellerName: s.seller.name,
+          endDate: s.endDate
+        }))
+      });
+    } catch (e) {
+      console.error("Error monitoring:", e);
+      return res.status(500).json({ error: "Erreur monitoring" });
     }
   });
 

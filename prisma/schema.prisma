@@ -18,6 +18,12 @@ enum UserRole {
   SELLER
 }
 
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique @db.VarChar(255)
@@ -30,6 +36,7 @@ model User {
   
   lives        LiveSession[]
   products     Product[]
+  auditLogs    AuditLog[]
 
   @@index([email])
   @@index([role])
@@ -168,20 +175,23 @@ model Reservation {
 }
 
 // ==========================================
-// 8. AuditLog Model (Seller Real-time Stats)
+// 8. AuditLog Model (Seller & Global Real-time Stats)
 // ==========================================
 model AuditLog {
-  id            String      @id @default(uuid()) @db.Uuid
-  liveSessionId String      @map("live_session_id") @db.Uuid
-  visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
-  actionType    String      @map("action_type") @db.VarChar(50) // 'join', 'interest', 'reservation'
-  productName   String?     @map("product_name") @db.VarChar(150)
-  details       String?     @db.Text
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  id            String       @id @default(uuid()) @db.Uuid
+  liveSessionId String?      @map("live_session_id") @db.Uuid
+  visitorPseudo String?      @map("visitor_pseudo") @db.VarChar(50)
+  userId        String?      @map("user_id") @db.Uuid
+  actionType    String       @map("action_type") @db.VarChar(50) // 'join', 'interest', 'reservation', 'connexion_vendeur', etc.
+  productName   String?      @map("product_name") @db.VarChar(150)
+  details       String?      @db.Text
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
 
-  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  liveSession   LiveSession? @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user          User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 
@@ -202,56 +212,40 @@ model LiveNotification {
 }
 
 // ==========================================
-// 10. SAAS ADMIN SECURITY & MONITORING MODELS
+// 10. AdminNotification Model (SaaS Level)
 // ==========================================
-
-enum UserStatus {
-  ACTIVE
-  SUSPENDED
-  PENDING
-}
-
-model GlobalAuditLog {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  userEmail String?  @map("user_email") @db.VarChar(255)
-  action    String   @db.VarChar(100)
-  details   String?  @db.Text
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@map("global_audit_logs")
-}
-
 model AdminNotification {
   id        String   @id @default(uuid()) @db.Uuid
-  type      String   @db.VarChar(50) // 'EXPIRED_SHOP', 'OUT_OF_STOCK', 'SUSPENDED_SELLER', 'UNUSUAL_ACTIVITY', 'SYSTEM_ERROR'
-  title     String   @db.VarChar(255)
+  title     String   @db.VarChar(150)
   message   String   @db.Text
+  type      String   @db.VarChar(50) // 'abuse', 'error', 'system', 'alert', 'stock'
   isRead    Boolean  @default(false) @map("is_read")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("admin_notifications")
 }
 
+// ==========================================
+// 11. SystemAlert Model (Health Monitoring)
+// ==========================================
 model SystemAlert {
-  id        String   @id @default(uuid()) @db.Uuid
-  type      String   @db.VarChar(50)
-  severity  String   @db.VarChar(20) // 'INFO', 'WARNING', 'CRITICAL'
-  message   String   @db.Text
-  resolved  Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id         String   @id @default(uuid()) @db.Uuid
+  title      String   @db.VarChar(150)
+  message    String   @db.Text
+  severity   String   @db.VarChar(20) // 'info', 'warning', 'critical'
+  isResolved Boolean  @default(false) @map("is_resolved")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("system_alerts")
 }
 
-model SellerStatusHistory {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  status    UserStatus
-  reason    String?  @db.Text
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+// ==========================================
+// 12. SystemConfig Model (Cross Recommendation settings, etc.)
+// ==========================================
+model SystemConfig {
+  key   String @id @db.VarChar(100)
+  value String @db.Text
 
-  @@map("seller_statuses")
+  @@map("system_config")
 }
-
 

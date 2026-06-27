@@ -20,7 +20,7 @@ export default function App() {
   
   // Dashboard view tabs
   const [sellerTab, setSellerTab] = useState<'lives' | 'products' | 'analytics'>('lives');
-  const [adminTab, setAdminTab] = useState<'users' | 'lives' | 'stats'>('users');
+  const [adminTab, setAdminTab] = useState<'overview' | 'sellers' | 'shops' | 'products' | 'monitoring' | 'audit' | 'alerts' | 'cross-rec'>('overview');
 
   // Core collections from server
   const [lives, setLives] = useState<any[]>([]);
@@ -29,6 +29,20 @@ export default function App() {
   const [adminStats, setAdminStats] = useState<any>(null);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [dataLoading, setDataLoading] = useState<boolean>(false);
+
+  // SaaS Admin States
+  const [adminDetailedStats, setAdminDetailedStats] = useState<any>(null);
+  const [adminSellers, setAdminSellers] = useState<any[]>([]);
+  const [adminShops, setAdminShops] = useState<any[]>([]);
+  const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
+  const [adminProductsData, setAdminProductsData] = useState<any>(null);
+  const [adminAlertsData, setAdminAlertsData] = useState<any>(null);
+  const [adminCrossRecData, setAdminCrossRecData] = useState<any>(null);
+  const [adminLiveMonitoring, setAdminLiveMonitoring] = useState<any>(null);
+
+  // Filters
+  const [auditLogSellerFilter, setAuditLogSellerFilter] = useState<string>('');
+  const [auditLogActionFilter, setAuditLogActionFilter] = useState<string>('');
 
   // Visitor info for public live view
   const [visitorPseudo, setVisitorPseudo] = useState<string>(() => localStorage.getItem('orion_visitor_pseudo') || '');
@@ -195,21 +209,50 @@ export default function App() {
   const fetchAdminData = async () => {
     setDataLoading(true);
     try {
-      const [statsRes, usersRes, livesRes] = await Promise.all([
-        fetch('/api/admin/stats'),
-        fetch('/api/admin/users'),
-        fetch('/api/lives')
+      const [
+        detailedStatsRes,
+        sellersRes,
+        shopsRes,
+        productsRes,
+        alertsRes,
+        crossRecRes,
+        monitoringRes,
+        auditLogsRes
+      ] = await Promise.all([
+        fetch('/api/admin/detailed-stats'),
+        fetch('/api/admin/sellers'),
+        fetch('/api/admin/shops'),
+        fetch('/api/admin/products'),
+        fetch('/api/admin/alerts'),
+        fetch('/api/admin/cross-recommendation'),
+        fetch('/api/admin/live-monitoring'),
+        fetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
       ]);
 
-      if (statsRes.ok) setAdminStats(await statsRes.json());
-      if (usersRes.ok) setAdminUsers(await usersRes.json());
-      if (livesRes.ok) setLives(await livesRes.json());
+      if (detailedStatsRes.ok) setAdminDetailedStats(await detailedStatsRes.json());
+      if (sellersRes.ok) setAdminSellers(await sellersRes.json());
+      if (shopsRes.ok) setAdminShops(await shopsRes.json());
+      if (productsRes.ok) setAdminProductsData(await productsRes.json());
+      if (alertsRes.ok) setAdminAlertsData(await alertsRes.json());
+      if (crossRecRes.ok) setAdminCrossRecData(await crossRecRes.json());
+      if (monitoringRes.ok) setAdminLiveMonitoring(await monitoringRes.json());
+      if (auditLogsRes.ok) setAdminAuditLogs(await auditLogsRes.json());
     } catch (e) {
-      showToast("Erreur de récupération des données administrateur.", "error");
+      showToast("Erreur de récupération des données administrateur SaaS.", "error");
     } finally {
       setDataLoading(false);
     }
   };
+
+  // Trigger audit logs refetch when filters change
+  useEffect(() => {
+    if (user && user.role === 'ADMIN' && route === 'admin') {
+      fetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
+        .then(res => res.json())
+        .then(data => setAdminAuditLogs(data))
+        .catch(err => console.error(err));
+    }
+  }, [auditLogSellerFilter, auditLogActionFilter, user, route]);
 
   const fetchPublicLive = async () => {
     if (!liveSlug) return;
@@ -664,6 +707,64 @@ export default function App() {
       } else {
         const d = await res.json();
         showToast(d.error || "Suppression impossible.", "error");
+      }
+    } catch (e) {
+      showToast("Erreur de connexion.", "error");
+    }
+  };
+
+  const handleToggleSellerStatus = async (sellerId: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
+    try {
+      const res = await fetch(`/api/admin/sellers/${sellerId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      if (res.ok) {
+        showToast(nextStatus === 'SUSPENDED' ? "Vendeur suspendu avec succès." : "Vendeur réactivé avec succès.");
+        fetchAdminData();
+      } else {
+        const d = await res.json();
+        showToast(d.error || "Action impossible.", "error");
+      }
+    } catch (e) {
+      showToast("Erreur de connexion.", "error");
+    }
+  };
+
+  const handleToggleShopStatus = async (shopId: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
+    try {
+      const res = await fetch(`/api/admin/shops/${shopId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      if (res.ok) {
+        showToast(nextStatus === 'INACTIVE' ? "Boutique désactivée." : "Boutique réactivée.");
+        fetchAdminData();
+      } else {
+        const d = await res.json();
+        showToast(d.error || "Action impossible.", "error");
+      }
+    } catch (e) {
+      showToast("Erreur de connexion.", "error");
+    }
+  };
+
+  const handleToggleCrossRecommendation = async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/admin/cross-recommendation/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) {
+        showToast(enabled ? "Moteur de recommandation croisée activé !" : "Moteur de recommandation croisée désactivé.");
+        fetchAdminData();
+      } else {
+        showToast("Erreur de modification.", "error");
       }
     } catch (e) {
       showToast("Erreur de connexion.", "error");
@@ -2033,15 +2134,28 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col" id="admin-view">
         {/* Header */}
-        <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-900/40 backdrop-blur-md">
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-6 h-6 text-amber-500" />
-            <span className="font-extrabold text-white text-md">Orion <span className="text-amber-500 font-medium">Console Admin</span></span>
+        <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-900/40 backdrop-blur-md sticky top-0 z-50">
+          <div className="flex items-center space-x-3">
+            <ShieldCheck className="w-6 h-6 text-indigo-500" />
+            <span className="font-extrabold text-white text-md">Orion <span className="text-indigo-400 font-medium">Console SaaS Admin</span></span>
+            {adminAlertsData?.unreadCount > 0 && (
+              <span className="bg-rose-600/20 text-rose-400 text-[10px] font-black border border-rose-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                {adminAlertsData.unreadCount} ALERTES PLATFORME
+              </span>
+            )}
           </div>
           <div className="flex items-center space-x-4 text-xs">
             <button 
+              onClick={fetchAdminData}
+              className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 hover:text-white transition flex items-center gap-1.5"
+              title="Rafraîchir les métriques"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Rafraîchir</span>
+            </button>
+            <button 
               onClick={() => navigateTo('dashboard')}
-              className="bg-indigo-950 text-indigo-300 border border-indigo-900 px-3 py-1.5 rounded-xl font-bold transition"
+              className="bg-indigo-950 text-indigo-300 border border-indigo-900/40 hover:bg-indigo-900/60 px-3 py-1.5 rounded-xl font-bold transition"
             >
               Aller à l'espace vendeur
             </button>
@@ -2051,141 +2165,729 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 flex flex-col space-y-8">
-          
-          {/* Admin Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-400 font-bold">Vendeurs inscrits</span>
-                <p className="text-xl font-black text-white">{adminStats?.sellersCount || 0}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400">
-                <Users className="w-5 h-5" />
-              </div>
-            </div>
+        <div className="flex-1 flex flex-col lg:flex-row">
+          {/* SaaS Navigation sidebar */}
+          <aside className="w-full lg:w-64 bg-slate-900/20 border-b lg:border-b-0 lg:border-r border-slate-900 p-6 space-y-4">
+            <span className="text-[10px] uppercase font-extrabold text-slate-500 tracking-wider">Pilotage Centralisé</span>
+            <nav className="flex flex-col space-y-1">
+              <button 
+                onClick={() => setAdminTab('overview')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'overview' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" /> Vue d'ensemble (Overview)
+              </button>
+              <button 
+                onClick={() => setAdminTab('sellers')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'sellers' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <Users className="w-4 h-4" /> Gestion des vendeurs
+              </button>
+              <button 
+                onClick={() => setAdminTab('shops')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'shops' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <Video className="w-4 h-4" /> Surveillance des boutiques
+              </button>
+              <button 
+                onClick={() => setAdminTab('products')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'products' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <Package className="w-4 h-4" /> Catalogue Produits global
+              </button>
+              <button 
+                onClick={() => setAdminTab('monitoring')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'monitoring' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <Activity className="w-4 h-4" /> Monitoring temps réel
+              </button>
+              <button 
+                onClick={() => setAdminTab('audit')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 ${
+                  adminTab === 'audit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-4 h-4" /> Journal d'audit d'activité
+              </button>
+              <button 
+                onClick={() => setAdminTab('alerts')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 justify-between ${
+                  adminTab === 'alerts' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Alertes de santé</span>
+                </div>
+                {adminAlertsData?.unreadCount > 0 && (
+                  <span className="px-2 py-0.5 bg-rose-600 text-white text-[9px] font-extrabold rounded-full">
+                    {adminAlertsData.unreadCount}
+                  </span>
+                )}
+              </button>
+              <button 
+                onClick={() => setAdminTab('cross-rec')}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 justify-between ${
+                  adminTab === 'cross-rec' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Layers className="w-4 h-4" />
+                  <span>Recommandation Croisée</span>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-[8px] font-black tracking-widest ${
+                  adminCrossRecData?.enabled ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/30' : 'bg-slate-850 text-slate-500'
+                }`}>
+                  {adminCrossRecData?.enabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </nav>
+          </aside>
 
-            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-400 font-bold">Directs planifiés</span>
-                <p className="text-xl font-black text-white">{adminStats?.totalLivesCount || 0}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400">
-                <Video className="w-5 h-5" />
-              </div>
-            </div>
+          {/* Main Content Pane */}
+          <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-8">
+            
+            {/* TABS 1: OVERVIEW */}
+            {adminTab === 'overview' && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Console d'analyse globale de la plateforme</h2>
+                  <p className="text-xs text-slate-400">Suivi consolidé de l'ensemble de l'activité multi-vendeurs et des conversions d'achat.</p>
+                </div>
 
-            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-400 font-bold">Réservations validées</span>
-                <p className="text-xl font-black text-white">{adminStats?.totalReservations || 0}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-400 font-bold">Transaction totale</span>
-                <p className="text-xl font-black text-white">{(adminStats?.totalSales || 0).toLocaleString('fr-FR')} FCFA</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400">
-                <Tag className="w-5 h-5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Admin Tabs */}
-          <div className="flex border-b border-slate-850">
-            <button 
-              onClick={() => setAdminTab('users')}
-              className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
-                adminTab === 'users' ? 'border-amber-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Users className="w-4 h-4" /> Gérer les Vendeurs
-            </button>
-            <button 
-              onClick={() => setAdminTab('lives')}
-              className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
-                adminTab === 'lives' ? 'border-amber-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Video className="w-4 h-4" /> Surveiller les Lives
-            </button>
-          </div>
-
-          {/* Tab Content: MANAGE USERS */}
-          {adminTab === 'users' && (
-            <div className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-lg">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 font-bold uppercase">
-                    <th className="p-4">Utilisateur / Vendeur</th>
-                    <th className="p-4">Adresse Email</th>
-                    <th className="p-4">Date de Création</th>
-                    <th className="p-4">Rôle</th>
-                    <th className="p-4 text-right">Actions de Modération</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-850">
-                  {adminUsers.map(u => (
-                    <tr key={u.id} className="hover:bg-slate-850/30 transition text-slate-300">
-                      <td className="p-4 font-bold text-white">{u.name}</td>
-                      <td className="p-4 font-mono">{u.email}</td>
-                      <td className="p-4">{new Date(u.created_at).toLocaleDateString()}</td>
-                      <td className="p-4">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          u.role === 'ADMIN' ? 'bg-amber-950 text-amber-400 border border-amber-800/30' : 'bg-slate-850 text-slate-400'
-                        }`}>
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right space-x-2">
-                        <button 
-                          onClick={() => handleToggleUserRole(u.id, u.role)}
-                          className="bg-slate-800 hover:bg-slate-750 text-slate-300 px-2.5 py-1 rounded text-[10px] font-bold transition"
-                        >
-                          Inverser Rôle
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="bg-rose-950/50 hover:bg-rose-950 text-rose-400 px-2.5 py-1 rounded text-[10px] font-bold transition"
-                        >
-                          Bannir / Supprimer
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Tab Content: MONITOR ALL LIVES */}
-          {adminTab === 'lives' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {lives.map(l => (
-                <div key={l.id} className="bg-slate-900 border border-slate-850 rounded-2xl p-5 shadow-lg space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-sm font-bold text-white line-clamp-1">{l.title}</h4>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      l.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {l.status}
-                    </span>
+                {/* KPI Metrics row 1 */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-900/60 border border-slate-900 p-5 rounded-2xl flex flex-col justify-between space-y-4">
+                    <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Total Vendeurs</span>
+                    <div className="flex justify-between items-end">
+                      <p className="text-2xl font-black text-white">{adminDetailedStats?.totalSellers || 0}</p>
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                        <Users className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold">
+                      Actifs : <span className="text-emerald-400">{adminDetailedStats?.activeSellers || 0}</span> | Suspendus : <span className="text-rose-400">{adminDetailedStats?.suspendedSellers || 0}</span>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{l.description}</p>
-                  <div className="text-[11px] text-slate-400 border-t border-slate-850 pt-3 flex justify-between">
-                    <span>Lien direct public : </span>
-                    <a href={`#live/${l.slug}`} target="_blank" className="text-amber-400 hover:underline">/lives/{l.slug}</a>
+
+                  <div className="bg-slate-900/60 border border-slate-900 p-5 rounded-2xl flex flex-col justify-between space-y-4">
+                    <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Boutiques actives</span>
+                    <div className="flex justify-between items-end">
+                      <p className="text-2xl font-black text-white">{adminDetailedStats?.activeShops || 0}</p>
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                        <Video className="w-4 h-4 animate-pulse" />
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold">
+                      Programmées : <span className="text-indigo-400">{adminDetailedStats?.scheduledShops || 0}</span> | Clôturées : <span className="text-slate-400">{adminDetailedStats?.endedShops || 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 border border-slate-900 p-5 rounded-2xl flex flex-col justify-between space-y-4">
+                    <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Audience Platforme</span>
+                    <div className="flex justify-between items-end">
+                      <p className="text-2xl font-black text-white">{adminDetailedStats?.totalVisitors || 0}</p>
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400">
+                        <Activity className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold">
+                      Cumulé de sessions uniques visiteurs
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 border border-slate-900 p-5 rounded-2xl flex flex-col justify-between space-y-4">
+                    <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Réservations Multi-vendeurs</span>
+                    <div className="flex justify-between items-end">
+                      <p className="text-2xl font-black text-white">{adminDetailedStats?.totalReservations || 0}</p>
+                      <div className="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center text-pink-400">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold">
+                      Produits uniques dans le catalogue : <span className="text-slate-300">{adminDetailedStats?.totalProducts || 0}</span>
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
 
+                {/* Dashboard graphic distribution block */}
+                <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-6 space-y-4">
+                  <h4 className="text-xs font-extrabold text-white uppercase tracking-wider">Répartition de l'activité globale</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                    <div className="space-y-2">
+                      <span className="text-[10px] text-slate-400 block font-bold">Statut Vendeurs</span>
+                      <div className="w-full bg-slate-950 rounded-full h-2.5 flex overflow-hidden">
+                        <div style={{ width: `${(adminDetailedStats?.activeSellers / (adminDetailedStats?.totalSellers || 1)) * 100}%` }} className="bg-emerald-500 h-full" title="Actifs"></div>
+                        <div style={{ width: `${(adminDetailedStats?.suspendedSellers / (adminDetailedStats?.totalSellers || 1)) * 100}%` }} className="bg-rose-500 h-full" title="Suspendus"></div>
+                        <div style={{ width: `${(adminDetailedStats?.pendingSellers / (adminDetailedStats?.totalSellers || 1)) * 100}%` }} className="bg-amber-500 h-full" title="En attente"></div>
+                      </div>
+                      <div className="flex justify-between text-[9px] text-slate-500">
+                        <span>Actifs ({(adminDetailedStats?.activeSellers || 0)})</span>
+                        <span>Suspendus ({(adminDetailedStats?.suspendedSellers || 0)})</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-[10px] text-slate-400 block font-bold">Statut des Boutiques Live</span>
+                      <div className="w-full bg-slate-950 rounded-full h-2.5 flex overflow-hidden">
+                        <div style={{ width: `${(adminDetailedStats?.activeShops / ((adminDetailedStats?.activeShops + adminDetailedStats?.scheduledShops + adminDetailedStats?.endedShops) || 1)) * 100}%` }} className="bg-emerald-500 h-full" title="En Direct"></div>
+                        <div style={{ width: `${(adminDetailedStats?.scheduledShops / ((adminDetailedStats?.activeShops + adminDetailedStats?.scheduledShops + adminDetailedStats?.endedShops) || 1)) * 100}%` }} className="bg-indigo-500 h-full" title="Programmées"></div>
+                        <div style={{ width: `${(adminDetailedStats?.endedShops / ((adminDetailedStats?.activeShops + adminDetailedStats?.scheduledShops + adminDetailedStats?.endedShops) || 1)) * 100}%` }} className="bg-slate-700 h-full" title="Clôturées"></div>
+                      </div>
+                      <div className="flex justify-between text-[9px] text-slate-500">
+                        <span>Directs ({(adminDetailedStats?.activeShops || 0)})</span>
+                        <span>Plannifiés ({(adminDetailedStats?.scheduledShops || 0)})</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-[10px] text-slate-400 block font-bold">Rendement de conversion</span>
+                      <div className="bg-indigo-950/40 border border-indigo-900/30 rounded-xl p-3 flex justify-between items-center">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] text-indigo-400 font-bold uppercase tracking-wider block">Taux Réservations / Visiteurs</span>
+                          <span className="text-sm font-black text-white">
+                            {adminDetailedStats?.totalVisitors > 0 ? ((adminDetailedStats.totalReservations / adminDetailedStats.totalVisitors) * 100).toFixed(1) : 0}%
+                          </span>
+                        </div>
+                        <Activity className="w-5 h-5 text-indigo-400/50" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TABS 2: SELLERS */}
+            {adminTab === 'sellers' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Sellers Management (Gestion des vendeurs)</h2>
+                  <p className="text-xs text-slate-400">Visualisez les métriques de performance commerciale et suspendez ou réactivez les comptes des vendeurs instantanément.</p>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-900 rounded-2xl overflow-hidden shadow-xl">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 font-bold uppercase text-[9px] tracking-wider">
+                        <th className="p-4">Identité du vendeur</th>
+                        <th className="p-4">Inscription</th>
+                        <th className="p-4">Boutiques créées</th>
+                        <th className="p-4">Réservations totales</th>
+                        <th className="p-4">Statut</th>
+                        <th className="p-4 text-right">Actions système</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-850">
+                      {adminSellers.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-500 italic">Aucun vendeur enregistré sur la plateforme.</td>
+                        </tr>
+                      ) : (
+                        adminSellers.map(seller => (
+                          <tr key={seller.id} className="hover:bg-slate-850/30 transition text-slate-300">
+                            <td className="p-4">
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-white block">{seller.name}</span>
+                                <span className="text-[10px] text-slate-500 font-mono block">{seller.email}</span>
+                              </div>
+                            </td>
+                            <td className="p-4 text-slate-400">{new Date(seller.createdAt).toLocaleDateString()}</td>
+                            <td className="p-4">
+                              <span className="font-bold text-slate-300">{seller.totalShops} boutiques</span>
+                              {seller.activeShops > 0 && (
+                                <span className="text-[10px] text-emerald-400 font-bold block">({seller.activeShops} actives actuellement)</span>
+                              )}
+                            </td>
+                            <td className="p-4 font-black text-indigo-400">{seller.totalReservations} réservations</td>
+                            <td className="p-4">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase border ${
+                                seller.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border-emerald-800/30' :
+                                seller.status === 'SUSPENDED' ? 'bg-rose-950 text-rose-400 border-rose-800/30' :
+                                'bg-amber-950 text-amber-400 border-amber-800/30'
+                              }`}>
+                                {seller.status === 'ACTIVE' ? 'Actif' :
+                                 seller.status === 'SUSPENDED' ? 'Suspendu' :
+                                 'En attente'}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right space-x-2">
+                              {seller.status === 'ACTIVE' ? (
+                                <button 
+                                  onClick={() => handleToggleSellerStatus(seller.id, seller.status)}
+                                  className="bg-rose-950 hover:bg-rose-900 border border-rose-900/30 text-rose-400 px-3 py-1 rounded-xl text-[10px] font-bold transition"
+                                >
+                                  Suspendre
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleToggleSellerStatus(seller.id, seller.status)}
+                                  className="bg-emerald-950 hover:bg-emerald-900 border border-emerald-900/30 text-emerald-400 px-3 py-1 rounded-xl text-[10px] font-bold transition"
+                                >
+                                  Réactiver
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => handleDeleteUser(seller.id)}
+                                className="bg-slate-800 hover:bg-rose-650 hover:text-white text-slate-400 px-2.5 py-1 rounded-xl text-[10px] font-bold transition"
+                                title="Supprimer définitivement"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TABS 3: SHOPS */}
+            {adminTab === 'shops' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Surveillance des boutiques live</h2>
+                  <p className="text-xs text-slate-400">Modérez l'ensemble des sessions commerciales programmées ou diffusées par les différents marchands.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {adminShops.length === 0 ? (
+                    <div className="md:col-span-2 bg-slate-900 border border-slate-900 p-12 text-center rounded-2xl italic text-slate-500">
+                      Aucune boutique éphémère active ou planifiée.
+                    </div>
+                  ) : (
+                    adminShops.map(shop => (
+                      <div key={shop.id} className="bg-slate-900 border border-slate-900 rounded-2xl p-5 shadow-xl flex flex-col justify-between space-y-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">Par : {shop.sellerName}</span>
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                              shop.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/30' :
+                              shop.status === 'SCHEDULED' ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/30' :
+                              shop.status === 'INACTIVE' ? 'bg-rose-950 text-rose-400 border border-rose-800/30' :
+                              'bg-slate-800 text-slate-400'
+                            }`}>
+                              {shop.status}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-bold text-white line-clamp-1">{shop.title}</h4>
+                          
+                          {/* Dedicated separate lines for date and hours as requested */}
+                          <div className="text-[10px] text-slate-400 bg-slate-950/60 p-2.5 rounded-xl border border-slate-850 space-y-1">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-indigo-400" />
+                              <span>Début : <strong>{new Date(shop.startDate).toLocaleDateString()}</strong> à <strong>{new Date(shop.startDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-pink-400" />
+                              <span>Fin : <strong>{new Date(shop.endDate).toLocaleDateString()}</strong> à <strong>{new Date(shop.endDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-850/60 flex justify-between items-center text-[10px]">
+                          <div className="flex gap-4">
+                            <span className="text-slate-400">Visiteurs: <strong className="text-white">{shop.visitorsCount}</strong></span>
+                            <span className="text-slate-400">Réservations: <strong className="text-indigo-400">{shop.reservationsCount}</strong></span>
+                          </div>
+
+                          <div className="flex gap-1.5">
+                            {shop.status === 'INACTIVE' ? (
+                              <button 
+                                onClick={() => handleToggleShopStatus(shop.id, shop.status)}
+                                className="bg-emerald-950 hover:bg-emerald-900 border border-emerald-900/30 text-emerald-400 text-[10px] font-black px-2.5 py-1 rounded-lg transition"
+                              >
+                                Réactiver
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => handleToggleShopStatus(shop.id, shop.status)}
+                                className="bg-rose-950/80 hover:bg-rose-900 border border-rose-900/30 text-rose-400 text-[10px] font-black px-2.5 py-1 rounded-lg transition"
+                              >
+                                Désactiver
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TABS 4: PRODUCTS */}
+            {adminTab === 'products' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Catalogue global des produits</h2>
+                  <p className="text-xs text-slate-400">Supervisez et segmentez l'intégralité du catalogue d'articles du système pour détecter les anomalies de stock et les meilleures ventes.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* SEGMENT 1: RUPTURE DE STOCK */}
+                  <div className="bg-slate-900/80 border border-slate-900 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-1.5 pb-2 border-b border-slate-850">
+                      <AlertTriangle className="w-4 h-4 text-rose-500" />
+                      <h4 className="text-xs font-black text-white uppercase tracking-wider">Ruptures de Stock</h4>
+                    </div>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {!adminProductsData?.outOfStock || adminProductsData.outOfStock.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 italic text-center py-4">Aucune rupture critique détectée.</p>
+                      ) : (
+                        adminProductsData.outOfStock.map((p: any) => (
+                          <div key={p.id} className="p-3 bg-slate-950 border border-slate-850 rounded-xl space-y-1">
+                            <div className="flex justify-between font-bold text-white text-[11px]">
+                              <span className="truncate max-w-[150px]">{p.name}</span>
+                              <span className="text-rose-400 font-mono">0 Stock</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 block">Vendeur: {p.sellerName}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* SEGMENT 2: PRODUITS PHARES */}
+                  <div className="bg-slate-900/80 border border-slate-900 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-1.5 pb-2 border-b border-slate-850">
+                      <ShoppingBag className="w-4 h-4 text-emerald-500" />
+                      <h4 className="text-xs font-black text-white uppercase tracking-wider">Produits phares (Top)</h4>
+                    </div>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {!adminProductsData?.highlyReserved || adminProductsData.highlyReserved.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 italic text-center py-4">Aucune réservation enregistrée.</p>
+                      ) : (
+                        adminProductsData.highlyReserved.map((p: any) => (
+                          <div key={p.id} className="p-3 bg-slate-950 border border-slate-850 rounded-xl space-y-1">
+                            <div className="flex justify-between font-bold text-white text-[11px]">
+                              <span className="truncate max-w-[140px]">{p.name}</span>
+                              <span className="text-indigo-400 font-mono">{p.reservationsCount} rés.</span>
+                            </div>
+                            <div className="flex justify-between text-[10px] text-slate-500">
+                              <span>Vendeur: {p.sellerName}</span>
+                              <span className="font-bold text-slate-400">{p.price.toLocaleString('fr-FR')} FCFA</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* SEGMENT 3: JAMAIS RESERVES */}
+                  <div className="bg-slate-900/80 border border-slate-900 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-1.5 pb-2 border-b border-slate-850">
+                      <HelpCircle className="w-4 h-4 text-slate-500" />
+                      <h4 className="text-xs font-black text-white uppercase tracking-wider">Jamais réservés</h4>
+                    </div>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {!adminProductsData?.neverReserved || adminProductsData.neverReserved.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 italic text-center py-4">Tous les articles ont du succès.</p>
+                      ) : (
+                        adminProductsData.neverReserved.slice(0, 15).map((p: any) => (
+                          <div key={p.id} className="p-3 bg-slate-950 border border-slate-850 rounded-xl space-y-1">
+                            <div className="flex justify-between font-bold text-white text-[11px]">
+                              <span className="truncate max-w-[150px]">{p.name}</span>
+                              <span className="text-slate-500 font-mono">{p.stock} pces</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 block">Vendeur: {p.sellerName}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TABS 5: MONITORING */}
+            {adminTab === 'monitoring' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Monitoring d'activité temps réel</h2>
+                  <p className="text-xs text-slate-400">Flux d'événements capturés à la seconde pour surveiller le comportement des acheteurs et marchands.</p>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-900 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="flex justify-between items-center pb-3 border-b border-slate-850">
+                    <span className="text-[10px] font-bold text-indigo-400 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      FLUX SECURISE OPERATIONNEL
+                    </span>
+                    <span className="text-[10px] text-slate-500">Rafraîchi automatiquement</span>
+                  </div>
+
+                  <div className="space-y-4 min-h-[300px] max-h-[500px] overflow-y-auto pr-2">
+                    {/* Reservations activity logs */}
+                    {adminLiveMonitoring?.newReservations?.map((r: any) => (
+                      <div key={r.id} className="flex gap-4 p-3 rounded-xl bg-slate-950 border border-indigo-950/40 text-xs">
+                        <span className="text-slate-500 font-mono shrink-0">{new Date(r.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                        <div className="space-y-1 flex-1">
+                          <p className="text-slate-300">
+                            Acheteur <strong className="text-white">{r.visitor}</strong> a validé la réservation de <strong className="text-indigo-400">{r.productName}</strong>.
+                          </p>
+                          <span className="text-[10px] text-slate-500 font-bold block">Session Live : "{r.liveTitle}"</span>
+                        </div>
+                        <span className="text-[10px] font-black text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded h-fit shrink-0">RESERVATION</span>
+                      </div>
+                    ))}
+
+                    {/* New shops logs */}
+                    {adminLiveMonitoring?.newShops?.map((s: any) => (
+                      <div key={s.id} className="flex gap-4 p-3 rounded-xl bg-slate-950 border border-emerald-950/40 text-xs">
+                        <span className="text-slate-500 font-mono shrink-0">{new Date(s.createdAt).toLocaleTimeString()}</span>
+                        <div className="flex-1 text-slate-300">
+                          Nouveau direct créé : <strong className="text-white">"{s.title}"</strong> par le vendeur <strong className="text-emerald-400">{s.sellerName}</strong>.
+                        </div>
+                        <span className="text-[10px] font-black text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded h-fit shrink-0">BOUTIQUE</span>
+                      </div>
+                    ))}
+
+                    {/* New seller registrees */}
+                    {adminLiveMonitoring?.newSellers?.map((s: any) => (
+                      <div key={s.id} className="flex gap-4 p-3 rounded-xl bg-slate-950 border border-amber-950/40 text-xs">
+                        <span className="text-slate-500 font-mono shrink-0">{new Date(s.createdAt).toLocaleTimeString()}</span>
+                        <div className="flex-1 text-slate-300">
+                          Nouveau vendeur inscrit : <strong className="text-white">{s.name}</strong> (<strong className="text-amber-400 font-mono">{s.email}</strong>).
+                        </div>
+                        <span className="text-[10px] font-black text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded h-fit shrink-0">INSCRIPTION</span>
+                      </div>
+                    ))}
+
+                    {/* Expiring shops warnings */}
+                    {adminLiveMonitoring?.expiringShops?.map((s: any) => (
+                      <div key={s.id} className="flex gap-4 p-3 rounded-xl bg-slate-950 border border-rose-950/40 text-xs">
+                        <span className="text-rose-500 font-mono shrink-0 font-bold">ALERTE</span>
+                        <div className="flex-1 text-slate-300">
+                          La boutique active <strong className="text-white">"{s.title}"</strong> (vendeur: {s.sellerName}) expire bientôt (Clôture à : {new Date(s.endDate).toLocaleTimeString()}).
+                        </div>
+                        <span className="text-[10px] font-black text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded h-fit shrink-0">EXPIRATION</span>
+                      </div>
+                    ))}
+
+                    {(!adminLiveMonitoring?.newReservations?.length && 
+                      !adminLiveMonitoring?.newShops?.length && 
+                      !adminLiveMonitoring?.newSellers?.length) && (
+                      <p className="text-center py-12 text-slate-500 italic text-xs">Aucun événement récent sur les 30 dernières minutes.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TABS 6: AUDIT TRAIL */}
+            {adminTab === 'audit' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Journal d'audit de sécurité globale</h2>
+                  <p className="text-xs text-slate-400">Trace inaltérable de l'intégralité des actions menées par les administrateurs et vendeurs.</p>
+                </div>
+
+                {/* Audit log filters panel */}
+                <div className="bg-slate-900 border border-slate-900 rounded-2xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-extrabold uppercase text-slate-400 block">Filtrer par vendeur</label>
+                    <select 
+                      value={auditLogSellerFilter} 
+                      onChange={(e) => setAuditLogSellerFilter(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    >
+                      <option value="">Tous les vendeurs</option>
+                      {adminSellers.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.email})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-extrabold uppercase text-slate-400 block">Filtrer par type d'action</label>
+                    <select 
+                      value={auditLogActionFilter} 
+                      onChange={(e) => setAuditLogActionFilter(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    >
+                      <option value="">Toutes les actions</option>
+                      <option value="LOGIN">Connexions</option>
+                      <option value="CREATE_SHOP">Créations Boutiques</option>
+                      <option value="UPDATE_SHOP">Modifications Boutiques</option>
+                      <option value="DELETE_SHOP">Suppressions Boutiques</option>
+                      <option value="CREATE_PRODUCT">Créations Produits</option>
+                      <option value="UPDATE_PRODUCT">Modifications Produits</option>
+                      <option value="DELETE_PRODUCT">Suppressions Produits</option>
+                      <option value="SUSPEND_SELLER">Suspensions Vendeurs</option>
+                      <option value="REACTIVATE_SELLER">Réactivations Vendeurs</option>
+                      <option value="reservation">Réservations acheteurs</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Audit trail table */}
+                <div className="bg-slate-900 border border-slate-900 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 font-bold uppercase text-[9px] tracking-wider">
+                        <th className="p-4">Horodatage (UTC)</th>
+                        <th className="p-4">Auteur</th>
+                        <th className="p-4">Action</th>
+                        <th className="p-4">Description d'activité</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
+                      {adminAuditLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-8 text-center text-slate-500 italic text-xs">Aucun log enregistré dans le journal d'audit.</td>
+                        </tr>
+                      ) : (
+                        adminAuditLogs.map(log => (
+                          <tr key={log.id} className="hover:bg-slate-850/30 transition text-slate-300">
+                            <td className="p-4 text-slate-500">{new Date(log.createdAt).toLocaleString()}</td>
+                            <td className="p-4 text-slate-400 font-bold">{log.username}</td>
+                            <td className="p-4">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                ['LOGIN'].includes(log.actionType) ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/20' :
+                                ['CREATE_SHOP', 'CREATE_PRODUCT'].includes(log.actionType) ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/20' :
+                                ['DELETE_SHOP', 'DELETE_PRODUCT', 'SUSPEND_SELLER'].includes(log.actionType) ? 'bg-rose-950 text-rose-400 border border-rose-800/20' :
+                                'bg-slate-800 text-slate-400'
+                              }`}>
+                                {log.actionType}
+                              </span>
+                            </td>
+                            <td className="p-4 text-slate-200">{log.details}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TABS 7: HEALTH ALERTS */}
+            {adminTab === 'alerts' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-md font-extrabold text-white">Hub de santé et alertes de plateforme</h2>
+                  <p className="text-xs text-slate-400">Le système audite en permanence les données pour lever des exceptions de sécurité ou logistiques.</p>
+                </div>
+
+                <div className="space-y-4">
+                  {!adminAlertsData?.alerts || adminAlertsData.alerts.length === 0 ? (
+                    <div className="bg-slate-900 border border-slate-900 rounded-2xl p-8 text-center space-y-3">
+                      <ShieldCheck className="w-12 h-12 text-emerald-500 mx-auto" />
+                      <h4 className="text-sm font-bold text-white">Plateforme parfaitement saine</h4>
+                      <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                        Aucune alerte logistique ou administrative levée. Les sessions en direct se terminent bien et les inventaires restent sains.
+                      </p>
+                    </div>
+                  ) : (
+                    adminAlertsData.alerts.map((alert: any) => (
+                      <div 
+                        key={alert.id} 
+                        className={`border rounded-2xl p-5 flex gap-4 items-start ${
+                          alert.severity === 'critical' ? 'bg-rose-950/20 border-rose-900/40 text-rose-400' :
+                          alert.severity === 'warning' ? 'bg-amber-950/20 border-amber-900/40 text-amber-400' :
+                          'bg-indigo-950/10 border-indigo-900/20 text-indigo-400'
+                        }`}
+                      >
+                        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-white">{alert.title}</h4>
+                            <span className="text-[9px] uppercase font-black tracking-widest bg-slate-950/80 px-1.5 py-0.5 rounded">
+                              {alert.severity}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 leading-relaxed">{alert.message}</p>
+                          <span className="text-[10px] text-slate-500 block font-mono">Détecté le : {new Date(alert.createdAt).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TABS 8: CROSS RECOMMENDATION */}
+            {adminTab === 'cross-rec' && (
+              <div className="space-y-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div>
+                    <h2 className="text-md font-extrabold text-white">Moteur de Recommandation Croisée Orion</h2>
+                    <p className="text-xs text-slate-400">Équilibrez dynamiquement l'audience en injectant des suggestions de produits de boutiques moins visibles sur les directs populaires.</p>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-850 p-2.5 rounded-2xl flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-300">Statut du moteur :</span>
+                    <button 
+                      onClick={() => handleToggleCrossRecommendation(!adminCrossRecData?.enabled)}
+                      className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition ${
+                        adminCrossRecData?.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-500'
+                      }`}
+                    >
+                      {adminCrossRecData?.enabled ? 'ACTIVÉ' : 'DÉSACTIVÉ'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Explanatory concept layout */}
+                <div className="bg-indigo-950/15 border border-indigo-900/30 p-6 rounded-2xl space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-indigo-400" />
+                    <h3 className="text-xs font-black uppercase tracking-wider text-white">Concept de recommandation croisée SaaS</h3>
+                  </div>
+                  <p className="text-xs text-indigo-300/80 leading-relaxed">
+                    Afin d'éviter le monopole de trafic et maximiser la conversion d'achat sur la plateforme, le moteur Orion prend automatiquement le premier article de catalogue d'une boutique à <strong>faible audience</strong> (moins de 3 spectateurs cumulés) et l'affiche discrètement dans la barre de recommandation de la boutique à <strong>forte audience</strong> (3 spectateurs ou plus).
+                  </p>
+                </div>
+
+                {/* Simulation mapping output */}
+                <div className="bg-slate-900 border border-slate-900 rounded-2xl p-6 space-y-4">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Recommandations et projections de clics en cours</h4>
+                  <div className="space-y-4">
+                    {!adminCrossRecData?.recommendations || adminCrossRecData.recommendations.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic text-center py-6">
+                        {adminCrossRecData?.enabled 
+                          ? "Aucun pont de trafic actif (il faut au moins une boutique populaire et une boutique de moindre trafic actives simultanément)."
+                          : "Le moteur est désactivé. Activez-le ci-dessus pour observer les projections."}
+                      </p>
+                    ) : (
+                      adminCrossRecData.recommendations.map((rec: any, index: number) => (
+                        <div key={index} className="flex flex-col md:flex-row items-center gap-4 bg-slate-950 border border-slate-850 p-4 rounded-xl text-xs justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <span className="font-bold text-white block">"{rec.sourceShopTitle}"</span>
+                              <span className="text-[10px] text-slate-500">Boutique populaire</span>
+                            </div>
+                            <ArrowRight className="w-5 h-5 text-indigo-400" />
+                            <div>
+                              <span className="font-bold text-indigo-400 block">"{rec.targetShopTitle}"</span>
+                              <span className="text-[10px] text-slate-500">Produit poussé : <strong>{rec.productName}</strong></span>
+                            </div>
+                          </div>
+
+                          <div className="bg-indigo-950/50 border border-indigo-900/40 p-2 rounded-xl text-right shrink-0">
+                            <span className="text-[10px] text-indigo-300 block">Projections clics générés</span>
+                            <strong className="text-white text-sm">+{rec.clicksCount} clics stimulés</strong>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </main>
         </div>
       </div>
     );

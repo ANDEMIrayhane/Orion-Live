@@ -84,8 +84,9 @@ export interface Reservation {
 
 export interface AuditLog {
   id: string;
-  live_session_id: string;
-  visitor_pseudo: string;
+  live_session_id?: string;
+  visitor_pseudo?: string;
+  user_id?: string;
   action_type: string;
   product_name?: string;
   details?: string;
@@ -288,11 +289,12 @@ function mapAuditLogToSnake(a: any): AuditLog {
   if (!a) return a;
   return {
     id: a.id,
-    live_session_id: a.liveSessionId,
-    visitor_pseudo: a.visitorPseudo,
+    live_session_id: a.liveSessionId || undefined,
+    visitor_pseudo: a.visitorPseudo || undefined,
+    user_id: a.userId || undefined,
     action_type: a.actionType,
-    product_name: a.productName,
-    details: a.details,
+    product_name: a.productName || undefined,
+    details: a.details || undefined,
     created_at: a.createdAt instanceof Date ? a.createdAt.toISOString() : a.createdAt,
   };
 }
@@ -477,11 +479,12 @@ class DatabaseManager {
     this.checkConnection();
     const a = await prisma.auditLog.create({
       data: {
-        liveSessionId: log.live_session_id,
-        visitorPseudo: log.visitor_pseudo,
+        liveSessionId: log.live_session_id || null,
+        visitorPseudo: log.visitor_pseudo || null,
+        userId: log.user_id || null,
         actionType: log.action_type,
         productName: log.product_name || null,
-        details: log.details
+        details: log.details || null
       }
     });
     return mapAuditLogToSnake(a);
@@ -499,7 +502,7 @@ class DatabaseManager {
           passwordHash: user.password_hash,
           name: user.name,
           role: user.role === 'ADMIN' ? 'ADMIN' : 'SELLER',
-          status: user.status === 'SUSPENDED' ? 'SUSPENDED' : user.status === 'PENDING' ? 'PENDING' : 'ACTIVE',
+          status: user.status || 'ACTIVE'
         }
       });
       return mapUserToSnake(u);
