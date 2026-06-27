@@ -10,6 +10,7 @@ export interface User {
   password_hash: string;
   name: string;
   role: 'ADMIN' | 'SELLER';
+  status: 'ACTIVE' | 'SUSPENDED' | 'PENDING';
   created_at: string;
   updated_at: string;
 }
@@ -115,12 +116,76 @@ export const prisma = new PrismaClient({
 });
 
 // Test Neon database connection and capture errors
+async function applySqlConstraints() {
+  try {
+    console.log("Prisma: Applying database-level TIMESTAMPTZ constraints on live_sessions...");
+    
+    // Clean up or adjust any potentially invalid records from older dev sessions to prevent check constraint errors
+    await prisma.$executeRawUnsafe(`
+      UPDATE live_sessions 
+      SET end_date = start_date + INTERVAL '1 hour'
+      WHERE start_date IS NOT NULL AND end_date IS NOT NULL AND end_date <= start_date
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      UPDATE live_sessions
+      SET end_date = start_date + INTERVAL '24 hours'
+      WHERE start_date IS NOT NULL AND end_date IS NOT NULL AND (end_date - start_date) > INTERVAL '24 hours'
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      UPDATE live_sessions
+      SET end_date = start_date + INTERVAL '30 minutes'
+      WHERE start_date IS NOT NULL AND end_date IS NOT NULL AND (end_date - start_date) < INTERVAL '30 minutes'
+    `);
+
+    // Create the CHECK constraints if they don't already exist in PostgreSQL
+    const endConstraintExists = await prisma.$queryRawUnsafe(`
+      SELECT 1 FROM pg_constraint WHERE conname = 'check_end_date_after_start_date'
+    `);
+    if (!(endConstraintExists as any[]).length) {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE live_sessions 
+        ADD CONSTRAINT check_end_date_after_start_date CHECK (end_date > start_date)
+      `);
+      console.log("Prisma: Constraint check_end_date_after_start_date successfully added.");
+    }
+
+    const maxConstraintExists = await prisma.$queryRawUnsafe(`
+      SELECT 1 FROM pg_constraint WHERE conname = 'check_max_duration_24h'
+    `);
+    if (!(maxConstraintExists as any[]).length) {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE live_sessions 
+        ADD CONSTRAINT check_max_duration_24h CHECK (end_date - start_date <= interval '24 hours')
+      `);
+      console.log("Prisma: Constraint check_max_duration_24h successfully added.");
+    }
+
+    const minConstraintExists = await prisma.$queryRawUnsafe(`
+      SELECT 1 FROM pg_constraint WHERE conname = 'check_min_duration_30m'
+    `);
+    if (!(minConstraintExists as any[]).length) {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE live_sessions 
+        ADD CONSTRAINT check_min_duration_30m CHECK (end_date - start_date >= interval '30 minutes')
+      `);
+      console.log("Prisma: Constraint check_min_duration_30m successfully added.");
+    }
+
+    console.log("Prisma: Database-level schedule constraints successfully verified!");
+  } catch (err) {
+    console.warn("Prisma Warning: Could not automatically verify/apply database-level check constraints:", err);
+  }
+}
+
 async function verifyDatabaseConnection() {
   if (dbConnectionError) return;
   try {
     console.log("Prisma: Attempting to connect to Neon PostgreSQL...");
     await prisma.$connect();
     console.log("Prisma: Successfully connected to Neon PostgreSQL!");
+    await applySqlConstraints();
   } catch (err) {
     dbConnectionError = "ERREUR CRITIQUE: Impossible de se connecter à la base de données Neon.\n" +
                         "Le système est bloqué car aucun mode de secours n'est autorisé.\n" +
@@ -145,6 +210,7 @@ function mapUserToSnake(u: any): User {
     password_hash: u.passwordHash,
     name: u.name,
     role: u.role,
+    status: u.status,
     created_at: u.createdAt instanceof Date ? u.createdAt.toISOString() : u.createdAt,
     updated_at: u.updatedAt instanceof Date ? u.updatedAt.toISOString() : u.updatedAt,
   };
@@ -425,7 +491,7 @@ class DatabaseManager {
   // TRANSACTION STABLE WRITE METHODS
   // ==========================================
 
-  public async insertUser(user: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User> {
+  public async insertUser(user: Omit<User, 'id' | 'created_at' | 'updated_at' | 'status'> & { status?: 'ACTIVE' | 'SUSPENDED' | 'PENDING' }): Promise<User> {
     try {
       const u = await prisma.user.create({
         data: {
@@ -433,6 +499,7 @@ class DatabaseManager {
           passwordHash: user.password_hash,
           name: user.name,
           role: user.role === 'ADMIN' ? 'ADMIN' : 'SELLER',
+          status: user.status === 'SUSPENDED' ? 'SUSPENDED' : user.status === 'PENDING' ? 'PENDING' : 'ACTIVE',
         }
       });
       return mapUserToSnake(u);
@@ -767,6 +834,29 @@ class DatabaseManager {
     return mapLiveNotificationToSnake(n);
   }
 
+  // Overlap prevention helper for scheduler conflicts
+  public async checkOverlap(userId: string, start_date: string, end_date: string, excludeId?: string): Promise<boolean> {
+    this.checkConnection();
+    const start = new Date(start_date);
+    const end = new Date(end_date);
+    const overlapping = await prisma.liveSession.findFirst({
+      where: {
+        userId,
+        status: { in: ['ACTIVE', 'SCHEDULED', 'SOLD_OUT'] },
+        id: excludeId ? { not: excludeId } : undefined,
+        AND: [
+          {
+            startDate: { lt: end }
+          },
+          {
+            endDate: { gt: start }
+          }
+        ]
+      }
+    });
+    return overlapping !== null;
+  }
+
   // ==========================================
   // AUTONOMOUS DATE & LIFECYCLE CONTROLLER
   // ==========================================
@@ -777,7 +867,8 @@ class DatabaseManager {
       const now = new Date();
 
       for (const live of lives) {
-        if (live.status === 'DRAFT') {
+        // Voluntarily deactivated or draft sessions must not be auto-transitioned
+        if (live.status === 'DRAFT' || live.status === 'INACTIVE') {
           continue;
         }
 
@@ -821,7 +912,18 @@ class DatabaseManager {
             where: { id: live.id },
             data: { status: targetStatus }
           });
-          console.log(`Auto-transitioned live session ${live.id} from ${live.status} to ${targetStatus}`);
+
+          // Journaliser l'action dans les logs système (AuditLog)
+          await prisma.auditLog.create({
+            data: {
+              liveSessionId: live.id,
+              visitorPseudo: 'SYSTEM',
+              actionType: 'sys-status-change',
+              details: `La boutique a été automatiquement passée au statut ${targetStatus} par le vérificateur de planification système (ancien statut: ${live.status}).`
+            }
+          });
+
+          console.log(`Auto-transitioned live session ${live.id} from ${live.status} to ${targetStatus} and logged to audit trails.`);
         }
       }
     } catch (e) {

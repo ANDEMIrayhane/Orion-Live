@@ -296,6 +296,114 @@ export default function App() {
   // ====================================================================
   // LIVES ACTIONS
   // ====================================================================
+  const splitDateTime = (dateTimeStr: string) => {
+    if (!dateTimeStr) return { date: '', time: '' };
+    const parts = dateTimeStr.split('T');
+    return {
+      date: parts[0] || '',
+      time: parts[1] || ''
+    };
+  };
+
+  const combineDateTime = (date: string, time: string) => {
+    let cleanDate = date;
+    if (date) {
+      const parts = date.split('-');
+      if (parts[0] && parts[0].length > 4) {
+        parts[0] = parts[0].slice(0, 4);
+        cleanDate = parts.join('-');
+      }
+    }
+    return `${cleanDate || ''}T${time || '00:00'}`;
+  };
+
+  const getLiveFormError = () => {
+    if (!liveFormStart || !liveFormEnd) return null;
+    const now = new Date();
+    const start = new Date(liveFormStart).getTime();
+    const end = new Date(liveFormEnd).getTime();
+
+    // Check year lengths
+    const startYear = new Date(liveFormStart).getFullYear();
+    const endYear = new Date(liveFormEnd).getFullYear();
+    if (isNaN(startYear) || startYear > 9999 || startYear < 1000) {
+      return "L'année de début doit être un nombre à 4 chiffres (ex. 2026).";
+    }
+    if (isNaN(endYear) || endYear > 9999 || endYear < 1000) {
+      return "L'année de fin doit être un nombre à 4 chiffres (ex. 2026).";
+    }
+
+    // Only validate past start_date if it is a new live or if the start_date has changed
+    let checkStartPast = !liveEditId;
+    if (liveEditId) {
+      const origLive = lives.find(l => l.id === liveEditId);
+      if (origLive && new Date(liveFormStart).getTime() !== new Date(origLive.start_date).getTime()) {
+        checkStartPast = true;
+      }
+    }
+
+    if (checkStartPast && start < now.getTime() - 60000) {
+      return "La date de début ne peut pas être dans le passé.";
+    }
+    if (end <= start) {
+      return "La date de fin doit être postérieure à la date de début.";
+    }
+    const durationMs = end - start;
+    if (durationMs > 24 * 60 * 60 * 1000) {
+      return "La durée maximale autorisée est de 24 heures.";
+    }
+    if (durationMs < 30 * 60 * 1000) {
+      return "La durée minimale autorisée est de 30 minutes.";
+    }
+    return null;
+  };
+
+  const getReactivateFormError = () => {
+    if (!reactivateStart || !reactivateEnd) return null;
+    const now = new Date();
+    const start = new Date(reactivateStart).getTime();
+    const end = new Date(reactivateEnd).getTime();
+
+    // Check year lengths
+    const startYear = new Date(reactivateStart).getFullYear();
+    const endYear = new Date(reactivateEnd).getFullYear();
+    if (isNaN(startYear) || startYear > 9999 || startYear < 1000) {
+      return "L'année de début doit être un nombre à 4 chiffres (ex. 2026).";
+    }
+    if (isNaN(endYear) || endYear > 9999 || endYear < 1000) {
+      return "L'année de fin doit être un nombre à 4 chiffres (ex. 2026).";
+    }
+
+    if (start < now.getTime() - 60000) {
+      return "La date de début ne peut pas être dans le passé.";
+    }
+    if (end <= start) {
+      return "La date de fin doit être postérieure à la date de début.";
+    }
+    const durationMs = end - start;
+    if (durationMs > 24 * 60 * 60 * 1000) {
+      return "La durée maximale autorisée est de 24 heures.";
+    }
+    if (durationMs < 30 * 60 * 1000) {
+      return "La durée minimale autorisée est de 30 minutes.";
+    }
+    return null;
+  };
+
+  const getLiveDurationText = (startStr: string, endStr: string) => {
+    if (!startStr || !endStr) return '';
+    const start = new Date(startStr).getTime();
+    const end = new Date(endStr).getTime();
+    if (end <= start) return '';
+    const diffMs = end - start;
+    const hours = Math.floor(diffMs / (60 * 60 * 1000));
+    const mins = Math.round((diffMs % (60 * 60 * 1000)) / (60 * 1000));
+    let text = "Durée : ";
+    if (hours > 0) text += `${hours}h `;
+    if (mins > 0) text += `${mins}min`;
+    return text.trim();
+  };
+
   const handleCreateOrUpdateLive = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!liveFormTitle || !liveFormSlug || !liveFormStart || !liveFormEnd) {
@@ -303,16 +411,10 @@ export default function App() {
       return;
     }
 
-    // Client-side 24h limit checker
-    const start = new Date(liveFormStart).getTime();
-    const end = new Date(liveFormEnd).getTime();
-    const durationMs = end - start;
-    if (durationMs > 24 * 60 * 60 * 1000) {
-      showToast("La durée maximale d'un direct est limitée à 24 heures (Règle anti-abus).", "error");
-      return;
-    }
-    if (durationMs <= 0) {
-      showToast("La date de fin doit être postérieure à la date de début.", "error");
+    // Client-side strict validation
+    const validationError = getLiveFormError();
+    if (validationError) {
+      showToast(validationError, "error");
       return;
     }
 
@@ -410,6 +512,13 @@ export default function App() {
       showToast("Veuillez renseigner les dates de début et de fin.", "error");
       return;
     }
+
+    const validationError = getReactivateFormError();
+    if (validationError) {
+      showToast(validationError, "error");
+      return;
+    }
+
     try {
       const res = await fetch(`/api/lives/${reactivateLiveId}/reactivate`, {
         method: 'POST',
@@ -1109,6 +1218,7 @@ export default function App() {
                                   l.status === 'ACTIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/20 animate-pulse' :
                                   l.status === 'DRAFT' ? 'bg-slate-800 text-slate-400' :
                                   l.status === 'SCHEDULED' ? 'bg-blue-950 text-blue-400 border border-blue-500/20' :
+                                  l.status === 'INACTIVE' ? 'bg-slate-800 text-amber-500 border border-slate-700' :
                                   l.status === 'SOLD_OUT' ? 'bg-amber-950 text-amber-400 border border-amber-500/20' :
                                   'bg-rose-950 text-rose-400'
                                 }`}>
@@ -1134,12 +1244,20 @@ export default function App() {
                                     </>
                                   )}
                                   {l.status === 'SCHEDULED' && (
-                                    <button 
-                                      onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
-                                      className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
-                                    >
-                                      Démarrer le Live
-                                    </button>
+                                    <>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
+                                        className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Démarrer le Live
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'INACTIVE')}
+                                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Désactiver
+                                      </button>
+                                    </>
                                   )}
                                   {l.status === 'ACTIVE' && (
                                     <>
@@ -1148,6 +1266,12 @@ export default function App() {
                                         className="text-[10px] bg-amber-600 hover:bg-amber-500 text-white px-2 py-0.5 rounded font-bold transition"
                                       >
                                         Épuisé
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'INACTIVE')}
+                                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Désactiver
                                       </button>
                                       <button 
                                         onClick={() => handleToggleLiveStatus(l, 'ENDED')}
@@ -1166,10 +1290,32 @@ export default function App() {
                                         Activer
                                       </button>
                                       <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'INACTIVE')}
+                                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Désactiver
+                                      </button>
+                                      <button 
                                         onClick={() => handleToggleLiveStatus(l, 'ENDED')}
                                         className="text-[10px] bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 rounded font-bold transition"
                                       >
                                         Clôturer
+                                      </button>
+                                    </>
+                                  )}
+                                  {l.status === 'INACTIVE' && (
+                                    <>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'SCHEDULED')}
+                                        className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Planifier
+                                      </button>
+                                      <button 
+                                        onClick={() => handleToggleLiveStatus(l, 'ACTIVE')}
+                                        className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded font-bold transition"
+                                      >
+                                        Démarrer
                                       </button>
                                     </>
                                   )}
@@ -1380,17 +1526,24 @@ export default function App() {
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden shadow-2xl">
               <div className="bg-slate-950 px-6 py-4 border-b border-slate-850 flex justify-between items-center">
-                <h3 className="text-sm font-bold text-white">{liveEditId ? "Modifier la boutique Live" : "Créer une boutique Live"}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-white">{liveEditId ? "Modifier la boutique Live" : "Créer une boutique Live"}</h3>
+                  {liveEditId && (
+                    <span className="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-bold uppercase">
+                      Statut actuel : {lives.find(l => l.id === liveEditId)?.status}
+                    </span>
+                  )}
+                </div>
                 <button onClick={() => setShowLiveModal(false)} className="text-slate-400 hover:text-white text-xs font-bold">Fermer</button>
               </div>
 
-              <form onSubmit={handleCreateOrUpdateLive} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              <form onSubmit={handleCreateOrUpdateLive} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Titre du direct *</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Titre du direct *</label>
                   <input 
                     type="text" 
                     required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                     placeholder="ex. Vente Live de Noël 🎄"
                     value={liveFormTitle}
                     onChange={(e) => setLiveFormTitle(e.target.value)}
@@ -1398,77 +1551,157 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Slug de boutique unique *</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Slug de boutique unique *</label>
                   <div className="flex">
-                    <span className="bg-slate-950 border border-r-0 border-slate-800 rounded-l-xl px-3 py-2 text-xs text-slate-500">/lives/</span>
+                    <span className="bg-slate-950 border border-r-0 border-slate-800 rounded-l-xl px-3.5 py-2.5 text-xs text-slate-500 font-medium">/lives/</span>
                     <input 
                       type="text" 
                       required 
-                      className="flex-1 bg-slate-950 border border-slate-800 rounded-r-xl px-3 py-2 text-xs text-white focus:outline-none"
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-r-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                       placeholder="vente-noel"
                       value={liveFormSlug}
                       onChange={(e) => setLiveFormSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
                     />
                   </div>
-                  <span className="text-[9px] text-slate-500 block">Les acheteurs rejoindront votre direct avec ce lien.</span>
+                  <span className="text-[9px] text-slate-500 block pl-1">Les acheteurs rejoindront votre direct avec ce lien.</span>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Description de la session</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Description de la session</label>
                   <textarea 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white h-20"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white h-20 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600 resize-none"
                     placeholder="Décrivez les lots, les modalités de paiement..."
                     value={liveFormDesc}
                     onChange={(e) => setLiveFormDesc(e.target.value)}
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-slate-400 font-bold uppercase">Début du Direct *</label>
-                    <input 
-                      type="datetime-local" 
-                      required 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                      value={liveFormStart}
-                      onChange={(e) => setLiveFormStart(e.target.value)}
-                    />
+                {/* Section Date & Time Separated */}
+                <div className="p-4 bg-slate-950/40 border border-slate-800/60 rounded-xl space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-850/60">
+                    <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Planification Horaire</span>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-slate-400 font-bold uppercase">Fin du Direct (Max +24h) *</label>
-                    <input 
-                      type="datetime-local" 
-                      required 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                      value={liveFormEnd}
-                      onChange={(e) => setLiveFormEnd(e.target.value)}
-                    />
+                  <div className="space-y-4">
+                    {/* Start Date & Time */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Début du Direct</span>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Date *</label>
+                          <div className="relative">
+                            <input 
+                              type="date" 
+                              required 
+                              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                              value={splitDateTime(liveFormStart).date}
+                              onChange={(e) => {
+                                const { time } = splitDateTime(liveFormStart);
+                                setLiveFormStart(combineDateTime(e.target.value, time || '12:00'));
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Heure *</label>
+                          <input 
+                            type="time" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(liveFormStart).time}
+                            onChange={(e) => {
+                              const { date } = splitDateTime(liveFormStart);
+                              setLiveFormStart(combineDateTime(date, e.target.value));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* End Date & Time */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Fin du Direct (Max +24h)</span>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Date *</label>
+                          <input 
+                            type="date" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(liveFormEnd).date}
+                            onChange={(e) => {
+                              const { time } = splitDateTime(liveFormEnd);
+                              setLiveFormEnd(combineDateTime(e.target.value, time || '13:00'));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Heure *</label>
+                          <input 
+                            type="time" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(liveFormEnd).time}
+                            onChange={(e) => {
+                              const { date } = splitDateTime(liveFormEnd);
+                              setLiveFormEnd(combineDateTime(date, e.target.value));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
+                {/* Real-time schedule validation feedback */}
+                {(() => {
+                  const error = getLiveFormError();
+                  const duration = getLiveDurationText(liveFormStart, liveFormEnd);
+                  if (error) {
+                    return (
+                      <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-medium leading-relaxed flex items-start gap-2">
+                        <span className="text-sm">⚠️</span>
+                        <span>{error}</span>
+                      </div>
+                    );
+                  } else if (duration) {
+                    return (
+                      <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-semibold leading-relaxed flex justify-between items-center">
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-emerald-400 text-sm">✓</span> Plage horaire valide
+                        </span>
+                        <span className="font-mono text-xs px-2 py-0.5 bg-emerald-950/80 border border-emerald-500/10 rounded-md">{duration}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">URL Image de couverture (Facultatif)</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">URL Image de couverture (Facultatif)</label>
                   <input 
                     type="text" 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                     placeholder="https://images.unsplash.com/..."
                     value={liveFormImg}
                     onChange={(e) => setLiveFormImg(e.target.value)}
                   />
                 </div>
 
-                <div className="space-y-1.5 pt-2 border-t border-slate-850">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Sélectionner les produits associés ({products.length} disponibles)</label>
+                <div className="space-y-2 pt-3 border-t border-slate-850">
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Associer des produits ({products.length} disponibles)</label>
                   {products.length === 0 ? (
-                    <span className="text-xs text-amber-400 block font-semibold">Créez d'abord des produits dans votre catalogue.</span>
+                    <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl text-xs text-amber-400 font-medium">
+                      Créez d'abord des produits dans votre catalogue.
+                    </div>
                   ) : (
-                    <div className="max-h-32 overflow-y-auto bg-slate-950 p-2.5 rounded-xl border border-slate-850 space-y-2">
+                    <div className="max-h-32 overflow-y-auto bg-slate-950 p-3 rounded-xl border border-slate-850 space-y-2.5 scrollbar-thin scrollbar-thumb-slate-800">
                       {products.map(p => (
-                        <label key={p.id} className="flex items-center space-x-2 text-xs text-slate-300 hover:text-white cursor-pointer">
+                        <label key={p.id} className="flex items-center space-x-2.5 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
                           <input 
                             type="checkbox" 
-                            className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0"
+                            className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-3.5 h-3.5 transition-all"
                             checked={liveFormSelectedProducts.includes(p.id)}
                             onChange={(e) => {
                               if (e.target.checked) {
@@ -1478,7 +1711,8 @@ export default function App() {
                               }
                             }}
                           />
-                          <span>{p.name} - <strong>{p.price.toLocaleString('fr-FR')} FCFA</strong> ({p.stock} restants)</span>
+                          <span className="truncate flex-1">{p.name}</span>
+                          <span className="font-mono text-[10px] text-slate-500 bg-slate-900 border border-slate-850 px-1.5 py-0.5 rounded">{p.price.toLocaleString('fr-FR')} FCFA</span>
                         </label>
                       ))}
                     </div>
@@ -1487,7 +1721,7 @@ export default function App() {
 
                 <button 
                   type="submit"
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md"
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0 duration-200"
                 >
                   {liveEditId ? "Enregistrer les modifications" : "Lancer ma boutique temporaire"}
                 </button>
@@ -1496,7 +1730,6 @@ export default function App() {
           </div>
         )}
 
-        {/* MODAL REACTIVATION LIVE */}
         {showReactivateModal && (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-800 max-w-md w-full rounded-2xl overflow-hidden shadow-2xl">
@@ -1504,7 +1737,7 @@ export default function App() {
                 <h3 className="text-sm font-bold text-white">Réactiver la session Live</h3>
                 <button 
                   onClick={() => { setShowReactivateModal(false); setReactivateLiveId(null); }} 
-                  className="text-slate-400 hover:text-white text-xs font-bold"
+                  className="text-slate-400 hover:text-white text-xs font-bold transition"
                 >
                   Fermer
                 </button>
@@ -1520,34 +1753,111 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase block">Date de début programmée *</label>
-                  <input 
-                    type="datetime-local" 
-                    required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    value={reactivateStart}
-                    onChange={(e) => setReactivateStart(e.target.value)}
-                  />
+                {/* Section Date & Time Separated for Reactivation */}
+                <div className="p-4 bg-slate-950/40 border border-slate-800/60 rounded-xl space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-850/60">
+                    <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Planification Horaire</span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Reactivate Start Date & Time */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Début du Direct</span>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Date *</label>
+                          <input 
+                            type="date" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(reactivateStart).date}
+                            onChange={(e) => {
+                              const { time } = splitDateTime(reactivateStart);
+                              setReactivateStart(combineDateTime(e.target.value, time || '12:00'));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Heure *</label>
+                          <input 
+                            type="time" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(reactivateStart).time}
+                            onChange={(e) => {
+                              const { date } = splitDateTime(reactivateStart);
+                              setReactivateStart(combineDateTime(date, e.target.value));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reactivate End Date & Time */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Fin du Direct (Max +24h)</span>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Date *</label>
+                          <input 
+                            type="date" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(reactivateEnd).date}
+                            onChange={(e) => {
+                              const { time } = splitDateTime(reactivateEnd);
+                              setReactivateEnd(combineDateTime(e.target.value, time || '13:00'));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase font-semibold">Heure *</label>
+                          <input 
+                            type="time" 
+                            required 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-all"
+                            value={splitDateTime(reactivateEnd).time}
+                            onChange={(e) => {
+                              const { date } = splitDateTime(reactivateEnd);
+                              setReactivateEnd(combineDateTime(date, e.target.value));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase block">Date de fin programmée * (Max 24h)</label>
-                  <input 
-                    type="datetime-local" 
-                    required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    value={reactivateEnd}
-                    onChange={(e) => setReactivateEnd(e.target.value)}
-                  />
-                  <span className="text-[9px] text-slate-500 block">Pour des raisons de performance, la durée de la boutique live est limitée à 24 heures.</span>
-                </div>
+                {/* Real-time reactivation schedule validation feedback */}
+                {(() => {
+                  const error = getReactivateFormError();
+                  const duration = getLiveDurationText(reactivateStart, reactivateEnd);
+                  if (error) {
+                    return (
+                      <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-medium leading-relaxed flex items-start gap-2">
+                        <span className="text-sm">⚠️</span>
+                        <span>{error}</span>
+                      </div>
+                    );
+                  } else if (duration) {
+                    return (
+                      <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-semibold leading-relaxed flex justify-between items-center">
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-emerald-400 text-sm">✓</span> Plage horaire valide
+                        </span>
+                        <span className="font-mono text-xs px-2 py-0.5 bg-emerald-950/80 border border-emerald-500/10 rounded-md">{duration}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
                 <button 
                   type="submit"
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md flex items-center justify-center gap-1"
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0 duration-200 flex items-center justify-center gap-1.5"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" /> Initialiser la nouvelle session
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" /> Initialiser la nouvelle session
                 </button>
               </form>
             </div>
@@ -1565,11 +1875,11 @@ export default function App() {
 
               <form onSubmit={handleCreateOrUpdateProduct} className="p-6 space-y-4">
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Nom de l'article *</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Nom de l'article *</label>
                   <input 
                     type="text" 
                     required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                     placeholder="ex. Veste Vintage Cuir"
                     value={productFormName}
                     onChange={(e) => setProductFormName(e.target.value)}
@@ -1577,9 +1887,9 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">Description détaillée</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Description détaillée</label>
                   <textarea 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white h-20"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white h-24 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600 resize-none"
                     placeholder="Matériaux, taille, état..."
                     value={productFormDesc}
                     onChange={(e) => setProductFormDesc(e.target.value)}
@@ -1588,12 +1898,12 @@ export default function App() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[11px] text-slate-400 font-bold uppercase">Prix unitaire (FCFA) *</label>
+                    <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Prix unitaire (FCFA) *</label>
                     <input 
                       type="number" 
                       step="1"
                       required 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                       placeholder="ex. 5000"
                       value={productFormPrice}
                       onChange={(e) => setProductFormPrice(e.target.value)}
@@ -1601,11 +1911,11 @@ export default function App() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[11px] text-slate-400 font-bold uppercase">Stock disponible *</label>
+                    <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">Stock disponible *</label>
                     <input 
                       type="number" 
                       required 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                       placeholder="ex. 1"
                       value={productFormStock}
                       onChange={(e) => setProductFormStock(e.target.value)}
@@ -1614,29 +1924,31 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-bold uppercase">URL Image du produit</label>
+                  <label className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block">URL Image du produit</label>
                   <input 
                     type="text" 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder-slate-600"
                     placeholder="https://images.unsplash.com/..."
                     value={productFormImg}
                     onChange={(e) => setProductFormImg(e.target.value)}
                   />
                 </div>
 
-                <label className="flex items-center space-x-2 text-xs text-slate-300 font-bold cursor-pointer pt-2">
-                  <input 
-                    type="checkbox" 
-                    className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0"
-                    checked={productFormIsActive}
-                    onChange={(e) => setProductFormIsActive(e.target.checked)}
-                  />
-                  <span>Produit disponible pour la vente</span>
-                </label>
+                <div className="pt-2">
+                  <label className="flex items-center space-x-2.5 text-xs text-slate-300 font-bold cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-4 h-4 transition-all"
+                      checked={productFormIsActive}
+                      onChange={(e) => setProductFormIsActive(e.target.checked)}
+                    />
+                    <span>Produit disponible pour la vente</span>
+                  </label>
+                </div>
 
                 <button 
                   type="submit"
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md"
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0 duration-200"
                 >
                   Enregistrer l'article
                 </button>
