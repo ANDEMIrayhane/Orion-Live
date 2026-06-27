@@ -109,7 +109,7 @@ export default function App() {
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
-  const [registerRole, setRegisterRole] = useState<'SELLER' | 'ADMIN'>('SELLER');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
 
   // Input for custom slug entry
   const [slugSearchInput, setSlugSearchInput] = useState('');
@@ -120,6 +120,20 @@ export default function App() {
   const showToast = (message: string, type: 'success' | 'warning' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const renderToast = () => {
+    if (!toast) return null;
+    return (
+      <div className={`fixed bottom-5 right-5 px-4 py-3 rounded-xl border text-xs font-bold shadow-lg z-[9999] animate-bounce flex items-center gap-2 ${
+        toast.type === 'success' ? 'bg-emerald-950 border-emerald-800 text-emerald-400' :
+        toast.type === 'warning' ? 'bg-amber-950 border-amber-800 text-amber-400' :
+        'bg-rose-950 border-rose-800 text-rose-400'
+      }`}>
+        <AlertCircle className="w-4 h-4" />
+        <span>{toast.message}</span>
+      </div>
+    );
   };
 
   // ====================================================================
@@ -444,21 +458,58 @@ export default function App() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const cleanEmail = registerEmail.trim().toLowerCase();
+    
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      showToast("Le format de l'adresse email est invalide. Exemple correct : utilisateur@gmail.com", "error");
+      return;
+    }
+    
+    if (cleanEmail.includes('localhost') || cleanEmail.endsWith('@') || cleanEmail.startsWith('@')) {
+      showToast("Le format de l'adresse email est invalide (localhost ou format incorrect).", "error");
+      return;
+    }
+    
+    const [localPart] = cleanEmail.split('@');
+    if (localPart.length < 2) {
+      showToast("L'adresse email est invalide (partie locale trop courte).", "error");
+      return;
+    }
+
+    if (registerPassword.length < 8) {
+      showToast("Le mot de passe doit contenir au moins 8 caractères.", "error");
+      return;
+    }
+    
+    const hasLetter = /[a-zA-Z]/.test(registerPassword);
+    const hasNumber = /[0-9]/.test(registerPassword);
+    if (!hasLetter || !hasNumber) {
+      showToast("Le mot de passe doit contenir au moins une lettre et au moins un chiffre.", "error");
+      return;
+    }
+
+    if (registerPassword !== registerConfirmPassword) {
+      showToast("La confirmation du mot de passe ne correspond pas.", "error");
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: registerName,
-          email: registerEmail,
+          email: cleanEmail,
           password: registerPassword,
-          role: registerRole
+          confirmPassword: registerConfirmPassword
         })
       });
       const data = await res.json();
       if (res.ok) {
         showToast("Compte créé avec succès ! Veuillez vous connecter.");
-        setLoginEmail(registerEmail);
+        setLoginEmail(cleanEmail);
         navigateTo('login');
       } else {
         showToast(data.error || "Erreur lors de l'inscription.", "error");
@@ -1179,6 +1230,7 @@ export default function App() {
         <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-500">
           <p>© 2026 Orion Live SaaS Inc. Tous droits réservés. Connecté à PostgreSQL.</p>
         </footer>
+        {renderToast()}
       </div>
     );
   }
@@ -1231,23 +1283,22 @@ export default function App() {
                   type="password" 
                   required 
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                  placeholder="Minimum 6 caractères"
+                  placeholder="Min. 8 caractères (lettre + chiffre)"
                   value={registerPassword}
                   onChange={(e) => setRegisterPassword(e.target.value)}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs text-slate-400 font-bold">Rôle de l'utilisateur (Sauvegardé en base de données)</label>
-                <select 
+                <label className="text-xs text-slate-400 font-bold">Confirmer le mot de passe</label>
+                <input 
+                  type="password" 
+                  required 
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                  value={registerRole}
-                  onChange={(e) => setRegisterRole(e.target.value as 'SELLER' | 'ADMIN')}
-                >
-                  <option value="SELLER">Vendeur (SELLER) - Gérer mes lives et produits</option>
-                  <option value="ADMIN">Administrateur (ADMIN) - Accès complet de gestion</option>
-                </select>
-                <span className="text-[10px] text-slate-500 block">Un utilisateur ne possède qu'un seul rôle, stocké en toute sécurité dans PostgreSQL.</span>
+                  placeholder="Confirmer votre mot de passe"
+                  value={registerConfirmPassword}
+                  onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                />
               </div>
 
               <button 
@@ -1265,6 +1316,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        {renderToast()}
       </div>
     );
   }
@@ -1326,6 +1378,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        {renderToast()}
       </div>
     );
   }
@@ -2731,16 +2784,7 @@ export default function App() {
         )}
 
         {/* Global Toast */}
-        {toast && (
-          <div className={`fixed bottom-5 right-5 px-4 py-3 rounded-xl border text-xs font-bold shadow-lg z-50 animate-bounce flex items-center gap-2 ${
-            toast.type === 'success' ? 'bg-emerald-950 border-emerald-800 text-emerald-400' :
-            toast.type === 'warning' ? 'bg-amber-950 border-amber-800 text-amber-400' :
-            'bg-rose-950 border-rose-800 text-rose-400'
-          }`}>
-            <AlertCircle className="w-4 h-4" />
-            <span>{toast.message}</span>
-          </div>
-        )}
+        {renderToast()}
       </div>
     );
   }
@@ -3561,6 +3605,7 @@ export default function App() {
 
           </main>
         </div>
+        {renderToast()}
       </div>
     );
   }
@@ -3942,6 +3987,7 @@ export default function App() {
         <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-500 bg-slate-950">
           <p>© 2026 Orion Live SaaS Inc. Tous droits réservés. Connecté à PostgreSQL.</p>
         </footer>
+        {renderToast()}
       </div>
     );
   }

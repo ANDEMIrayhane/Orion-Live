@@ -147,22 +147,56 @@ async function startServer() {
   // AUTHENTICATION API ROUTES
   // ==========================================
   app.post('/api/auth/register', async (req: Request, res: Response) => {
-    const { email, password, name, role } = req.body;
-    if (!email || !password || !name) {
+    const { email, password, confirmPassword, name } = req.body;
+    if (!email || !password || !confirmPassword || !name) {
       return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires." });
     }
 
-    const assignedRole = (role === 'ADMIN' || role === 'SELLER') ? role : 'SELLER';
+    const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    
+    // Strict email format validation
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: "Le format de l'adresse email est invalide. Exemple correct : utilisateur@gmail.com" });
+    }
+    
+    if (cleanEmail.includes('localhost') || cleanEmail.endsWith('@') || cleanEmail.startsWith('@')) {
+      return res.status(400).json({ error: "Le format de l'adresse email est invalide." });
+    }
+    
+    const [localPart] = cleanEmail.split('@');
+    if (localPart.length < 2) {
+      return res.status(400).json({ error: "L'adresse email est invalide (partie locale trop courte)." });
+    }
+
+    // Password validation: minimum 8 characters, at least 1 letter, and at least 1 number
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
+    }
+    
+    const hasLetter = /[a-zA-Z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    if (!hasLetter || !hasNumber) {
+      return res.status(400).json({ error: "Le mot de passe doit contenir au moins une lettre et au moins un chiffre." });
+    }
+
+    // Password confirmation match validation
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: "La confirmation du mot de passe ne correspond pas." });
+    }
+
+    // Public registrations are always SELLER
+    const assignedRole = 'SELLER';
 
     try {
-      const existing = await db.getUserByEmail(email);
+      const existing = await db.getUserByEmail(cleanEmail);
       if (existing) {
         return res.status(400).json({ error: "Cet email est déjà enregistré." });
       }
 
       const passwordHash = bcrypt.hashSync(password, 10);
       const user = await db.insertUser({
-        email,
+        email: cleanEmail,
         password_hash: passwordHash,
         name,
         role: assignedRole
