@@ -18,6 +18,8 @@ import {
   Legend,
   Area
 } from 'recharts';
+// @ts-ignore
+import orionLogo from './assets/images/orion_logo_1782604032311.jpg';
 
 export default function App() {
   // ====================================================================
@@ -1114,8 +1116,13 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between" id="home-view">
         {/* Navigation */}
         <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-          <div className="flex items-center space-x-2">
-            <Video className="w-6 h-6 text-indigo-500" />
+          <div className="flex items-center space-x-3">
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-9 w-9 rounded-xl border border-slate-800 object-cover shadow-lg" 
+              referrerPolicy="no-referrer"
+            />
             <span className="font-extrabold tracking-tight text-white text-lg">Orion<span className="text-indigo-400 font-medium">.live</span></span>
           </div>
           <div className="flex items-center space-x-3 text-xs">
@@ -1242,8 +1249,13 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100" id="register-view">
         <div className="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-3">
-          <div className="flex justify-center items-center space-x-2">
-            <Video className="w-8 h-8 text-indigo-500 animate-pulse" />
+          <div className="flex flex-col justify-center items-center space-y-3">
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-20 w-20 rounded-2xl border border-slate-800 object-cover shadow-2xl animate-pulse" 
+              referrerPolicy="no-referrer"
+            />
             <span className="text-2xl font-black text-white">Orion<span className="text-indigo-400 font-light">.live</span></span>
           </div>
           <h2 className="text-lg font-bold">Créer votre espace commerçant</h2>
@@ -1328,8 +1340,13 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100" id="login-view">
         <div className="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-3">
-          <div className="flex justify-center items-center space-x-2">
-            <Video className="w-8 h-8 text-indigo-500" />
+          <div className="flex flex-col justify-center items-center space-y-3">
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-20 w-20 rounded-2xl border border-slate-800 object-cover shadow-2xl" 
+              referrerPolicy="no-referrer"
+            />
             <span className="text-2xl font-black text-white">Orion<span className="text-indigo-400 font-light">.live</span></span>
           </div>
           <h2 className="text-lg font-bold">Connexion à la plateforme</h2>
@@ -1418,8 +1435,13 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col" id="dashboard-view">
         {/* Header */}
         <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-900/40 backdrop-blur-md">
-          <div className="flex items-center space-x-2">
-            <Video className="w-6 h-6 text-indigo-500" />
+          <div className="flex items-center space-x-3">
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-8 w-8 rounded-lg border border-slate-800 object-cover" 
+              referrerPolicy="no-referrer"
+            />
             <span className="font-extrabold text-white text-md">Orion <span className="text-indigo-400">Vendeur</span></span>
           </div>
           <div className="flex items-center space-x-4 text-xs">
@@ -2852,7 +2874,12 @@ export default function App() {
         {/* Header */}
         <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-900/40 backdrop-blur-md sticky top-0 z-50">
           <div className="flex items-center space-x-3">
-            <ShieldCheck className="w-6 h-6 text-indigo-500" />
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-8 w-8 rounded-lg border border-slate-800 object-cover" 
+              referrerPolicy="no-referrer"
+            />
             <span className="font-extrabold text-white text-md">Orion <span className="text-indigo-400 font-medium">Console SaaS Admin</span></span>
             {adminAlertsData?.unreadCount > 0 && (
               <span className="bg-rose-600/20 text-rose-400 text-[10px] font-black border border-rose-500/30 px-2 py-0.5 rounded-full animate-pulse">
@@ -3618,8 +3645,13 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between" id="visitor-storefront-view">
         {/* Header */}
         <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-          <div className="flex items-center space-x-2">
-            <Video className="w-5 h-5 text-indigo-500 animate-pulse" />
+          <div className="flex items-center space-x-3">
+            <img 
+              src={orionLogo} 
+              alt="Orion Live Logo" 
+              className="h-8 w-8 rounded-lg border border-slate-800 object-cover" 
+              referrerPolicy="no-referrer"
+            />
             <span className="font-extrabold text-white text-md">Orion <span className="text-indigo-400 font-light">Storefront</span></span>
           </div>
           
