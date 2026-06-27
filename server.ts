@@ -644,6 +644,60 @@ async function startServer() {
     }
   });
 
+  // ==========================================
+  // REAL-TIME V1 ACTIVE LIVE DASHBOARD ENDPOINTS
+  // ==========================================
+  app.get('/api/lives/:id/hot-prospects', requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      const live = await db.getLiveSessionById(id);
+      if (!live) return res.status(404).json({ error: "Live non trouvé" });
+      if (req.user?.role !== 'ADMIN' && live.user_id !== req.user?.id) {
+        return res.status(403).json({ error: "Non autorisé" });
+      }
+
+      const hotProspects = await db.getHotProspects(id);
+      return res.json(hotProspects);
+    } catch (e: any) {
+      console.error("Error fetching hot prospects:", e);
+      return res.status(500).json({ error: "Erreur lors de la récupération des prospects chauds" });
+    }
+  });
+
+  app.get('/api/lives/:id/popular-products', requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      const live = await db.getLiveSessionById(id);
+      if (!live) return res.status(404).json({ error: "Live non trouvé" });
+      if (req.user?.role !== 'ADMIN' && live.user_id !== req.user?.id) {
+        return res.status(403).json({ error: "Non autorisé" });
+      }
+
+      const popularProducts = await db.getPopularProducts(id);
+      return res.json(popularProducts);
+    } catch (e: any) {
+      console.error("Error fetching popular products:", e);
+      return res.status(500).json({ error: "Erreur lors de la récupération des produits populaires" });
+    }
+  });
+
+  app.get('/api/lives/:id/live-dashboard-stats', requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      const live = await db.getLiveSessionById(id);
+      if (!live) return res.status(404).json({ error: "Live non trouvé" });
+      if (req.user?.role !== 'ADMIN' && live.user_id !== req.user?.id) {
+        return res.status(403).json({ error: "Non autorisé" });
+      }
+
+      const dashboardStats = await db.getLiveDashboardStats(id);
+      return res.json(dashboardStats);
+    } catch (e: any) {
+      console.error("Error fetching live dashboard stats:", e);
+      return res.status(500).json({ error: "Erreur lors de la récupération des statistiques en temps réel" });
+    }
+  });
+
   // Reactivate finished live session
   app.post('/api/lives/:id/reactivate', requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -741,6 +795,40 @@ async function startServer() {
   });
 
   // ==========================================
+  // INPUT SANITIZATION, RATE LIMITING & VALIDATION HELPERS
+  // ==========================================
+  const ipLimits = new Map<string, { count: number; lastReset: number }>();
+
+  const checkRateLimit = (ip: string): boolean => {
+    const now = Date.now();
+    const limit = ipLimits.get(ip);
+    if (!limit) {
+      ipLimits.set(ip, { count: 1, lastReset: now });
+      return false;
+    }
+    if (now - limit.lastReset > 60000) {
+      ipLimits.set(ip, { count: 1, lastReset: now });
+      return false;
+    }
+    if (limit.count >= 30) { // Limit to 30 actions per minute per IP for production reliability
+      return true;
+    }
+    limit.count++;
+    return false;
+  };
+
+  const sanitizeInput = (val: any): string => {
+    if (typeof val !== 'string') return '';
+    return val.trim().replace(/<[^>]*>/g, '').slice(0, 150);
+  };
+
+  const validateWhatsApp = (phone: string): boolean => {
+    const cleanPhone = phone.replace(/\s+/g, '');
+    const regex = /^\+?[0-9]{8,18}$/;
+    return regex.test(cleanPhone);
+  };
+
+  // ==========================================
   // PUBLIC LIVE VISITOR ENDPOINTS
   // ==========================================
   app.get('/api/lives/public/:slug', async (req: Request, res: Response) => {
@@ -791,8 +879,20 @@ async function startServer() {
 
   app.post('/api/lives/public/:slug/join', async (req: Request, res: Response) => {
     const { slug } = req.params;
-    const { pseudo, whatsapp } = req.body;
+    let { pseudo, whatsapp } = req.body;
+    
+    pseudo = sanitizeInput(pseudo);
+    whatsapp = whatsapp ? sanitizeInput(whatsapp) : undefined;
+
     if (!pseudo) return res.status(400).json({ error: "Un pseudo est requis." });
+    if (whatsapp && !validateWhatsApp(whatsapp)) {
+      return res.status(400).json({ error: "Le format du numéro WhatsApp est invalide." });
+    }
+
+    const ip = req.ip || 'unknown';
+    if (checkRateLimit(ip)) {
+      return res.status(429).json({ error: "Trop de requêtes. Veuillez ralentir." });
+    }
 
     try {
       const live = await db.getLiveSessionBySlug(slug);
@@ -809,8 +909,15 @@ async function startServer() {
   // Pre-registration notification sign-up for SCHEDULED lives
   app.post('/api/lives/public/:slug/notify', async (req: Request, res: Response) => {
     const { slug } = req.params;
-    const { pseudo, whatsapp } = req.body;
+    let { pseudo, whatsapp } = req.body;
+
+    pseudo = sanitizeInput(pseudo);
+    whatsapp = whatsapp ? sanitizeInput(whatsapp) : undefined;
+
     if (!pseudo) return res.status(400).json({ error: "Un pseudo est requis." });
+    if (whatsapp && !validateWhatsApp(whatsapp)) {
+      return res.status(400).json({ error: "Le format du numéro WhatsApp est invalide." });
+    }
 
     try {
       const live = await db.getLiveSessionBySlug(slug);
@@ -842,8 +949,17 @@ async function startServer() {
 
   app.post('/api/lives/public/:slug/interest', async (req: Request, res: Response) => {
     const { slug } = req.params;
-    const { pseudo, productId } = req.body;
+    let { pseudo, productId } = req.body;
+
+    pseudo = sanitizeInput(pseudo);
+    productId = sanitizeInput(productId);
+
     if (!pseudo || !productId) return res.status(400).json({ error: "Paramètres manquants." });
+
+    const ip = req.ip || 'unknown';
+    if (checkRateLimit(ip)) {
+      return res.status(429).json({ error: "Trop de requêtes. Veuillez ralentir." });
+    }
 
     try {
       const live = await db.getLiveSessionBySlug(slug);
@@ -858,9 +974,29 @@ async function startServer() {
 
   app.post('/api/lives/public/:slug/reserve', async (req: Request, res: Response) => {
     const { slug } = req.params;
-    const { pseudo, whatsapp, productId } = req.body;
-    if (!pseudo || !productId || !whatsapp) {
-      return res.status(400).json({ error: "Veuillez entrer votre pseudo et votre numéro WhatsApp." });
+    let { pseudo, whatsapp, productId, quantity } = req.body;
+
+    pseudo = sanitizeInput(pseudo);
+    whatsapp = whatsapp ? sanitizeInput(whatsapp) : undefined;
+    productId = sanitizeInput(productId);
+    const parsedQuantity = parseInt(quantity, 10);
+
+    if (!pseudo) {
+      return res.status(400).json({ error: "Le pseudo est obligatoire pour réserver." });
+    }
+    if (!productId) {
+      return res.status(400).json({ error: "Identifiant du produit manquant." });
+    }
+    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ error: "Une quantité valide et supérieure à zéro est obligatoire." });
+    }
+    if (whatsapp && !validateWhatsApp(whatsapp)) {
+      return res.status(400).json({ error: "Le format du numéro WhatsApp fourni est invalide." });
+    }
+
+    const ip = req.ip || 'unknown';
+    if (checkRateLimit(ip)) {
+      return res.status(429).json({ error: "Trop de requêtes. Veuillez patienter avant d'effectuer une nouvelle réservation." });
     }
 
     try {
@@ -871,10 +1007,40 @@ async function startServer() {
         return res.status(400).json({ error: "Les réservations ne sont autorisées que pendant une session live active." });
       }
 
-      const reservation = await db.executeAtomicReservation(pseudo, whatsapp, productId, live.id);
+      const reservation = await db.executeAtomicReservation(pseudo, whatsapp || '', productId, live.id, parsedQuantity);
       return res.json({ success: true, reservation });
     } catch (e: any) {
       return res.status(400).json({ error: e.message || "Rupture de stock ou erreur de traitement." });
+    }
+  });
+
+  app.post('/api/lives/public/:slug/contact', async (req: Request, res: Response) => {
+    const { slug } = req.params;
+    let { pseudo, whatsapp } = req.body;
+
+    pseudo = sanitizeInput(pseudo);
+    whatsapp = whatsapp ? sanitizeInput(whatsapp) : '';
+
+    if (!pseudo) {
+      return res.status(400).json({ error: "Le pseudo est obligatoire pour demander à être contacté." });
+    }
+    if (!whatsapp || !validateWhatsApp(whatsapp)) {
+      return res.status(400).json({ error: "Un numéro WhatsApp valide est obligatoire pour être recontacté." });
+    }
+
+    const ip = req.ip || 'unknown';
+    if (checkRateLimit(ip)) {
+      return res.status(429).json({ error: "Trop de requêtes. Veuillez patienter." });
+    }
+
+    try {
+      const live = await db.getLiveSessionBySlug(slug);
+      if (!live) return res.status(404).json({ error: "Boutique de vente en direct introuvable." });
+
+      await db.recordContactRequest(pseudo, whatsapp, live.id);
+      return res.json({ success: true, message: "Demande de contact enregistrée avec succès !" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || "Erreur de traitement de votre demande." });
     }
   });
 
@@ -909,7 +1075,7 @@ async function startServer() {
       const scheduledShops = await prisma.liveSession.count({ where: { status: 'SCHEDULED' } });
       const endedShops = await prisma.liveSession.count({ where: { status: { in: ['ENDED', 'ARCHIVED'] } } });
 
-      const totalVisitors = await prisma.visitorSession.count();
+      const totalVisitors = await prisma.visitor.count();
       const totalReservations = await prisma.reservation.count();
       const totalProducts = await prisma.product.count();
 

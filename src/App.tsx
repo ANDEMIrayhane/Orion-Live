@@ -7,6 +7,17 @@ import {
   CheckCircle2, ShoppingCart, ShieldAlert, CheckSquare, Layers, 
   Calendar, Phone, Activity, HelpCircle, FileText, BarChart3, AlertTriangle, ShieldCheck
 } from 'lucide-react';
+import { 
+  ResponsiveContainer, 
+  ComposedChart,
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend,
+  Area
+} from 'recharts';
 
 export default function App() {
   // ====================================================================
@@ -29,6 +40,16 @@ export default function App() {
   const [adminStats, setAdminStats] = useState<any>(null);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [dataLoading, setDataLoading] = useState<boolean>(false);
+
+  // Active Live Dashboard V1 States
+  const [selectedAnalyticsLiveId, setSelectedAnalyticsLiveId] = useState<string>('');
+  const [activeLiveStats, setActiveLiveStats] = useState<any>(null);
+  const [activeHotProspects, setActiveHotProspects] = useState<any[]>([]);
+  const [activePopularProducts, setActivePopularProducts] = useState<any[]>([]);
+  const [loadingActiveAnalytics, setLoadingActiveAnalytics] = useState<boolean>(false);
+  const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
+  const [showContactModal, setShowContactModal] = useState<boolean>(false);
+  const [contactWhatsapp, setContactWhatsapp] = useState<string>('');
 
   // SaaS Admin States
   const [adminDetailedStats, setAdminDetailedStats] = useState<any>(null);
@@ -58,6 +79,8 @@ export default function App() {
   const [showLiveModal, setShowLiveModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [showReactivateModal, setShowReactivateModal] = useState(false);
+  const [showLiveAnalyticsModal, setShowLiveAnalyticsModal] = useState(false);
+  const [selectedLiveAnalytics, setSelectedLiveAnalytics] = useState<any>(null);
   const [reactivateLiveId, setReactivateLiveId] = useState<string | null>(null);
   const [reactivateStart, setReactivateStart] = useState('');
   const [reactivateEnd, setReactivateEnd] = useState('');
@@ -172,6 +195,16 @@ export default function App() {
         fetchAdminData();
       }
     }
+  }, [route, user, sellerTab]);
+
+  // Real-time automatic updates for Seller Dashboard stats & data (every 5 seconds)
+  useEffect(() => {
+    if (user && route === 'dashboard') {
+      const interval = setInterval(() => {
+        refreshSellerDataSilently();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
   }, [route, user]);
 
   // Fetch public live details if route is 'live'
@@ -205,6 +238,116 @@ export default function App() {
       setDataLoading(false);
     }
   };
+
+  const refreshSellerDataSilently = async () => {
+    try {
+      const [livesRes, productsRes, statsRes] = await Promise.all([
+        fetch('/api/lives'),
+        fetch('/api/products'),
+        fetch('/api/seller/stats')
+      ]);
+
+      if (livesRes.ok) {
+        const d = await livesRes.json();
+        setLives(d);
+      }
+      if (productsRes.ok) {
+        const d = await productsRes.json();
+        setProducts(d);
+      }
+      if (statsRes.ok) {
+        const d = await statsRes.json();
+        setAnalytics(d);
+      }
+    } catch (e) {
+      console.error("Silent refresh of seller data failed:", e);
+    }
+  };
+
+  const fetchActiveLiveAnalytics = async (liveId: string) => {
+    if (!liveId) return;
+    try {
+      const [statsRes, prospectsRes, popularRes] = await Promise.all([
+        fetch(`/api/lives/${liveId}/live-dashboard-stats`),
+        fetch(`/api/lives/${liveId}/hot-prospects`),
+        fetch(`/api/lives/${liveId}/popular-products`)
+      ]);
+
+      if (statsRes.ok) setActiveLiveStats(await statsRes.json());
+      if (prospectsRes.ok) setActiveHotProspects(await prospectsRes.json());
+      if (popularRes.ok) setActivePopularProducts(await popularRes.json());
+    } catch (e) {
+      console.error("Error loading active analytics:", e);
+    }
+  };
+
+  const handleExportProspects = (prospects: any[]) => {
+    if (!prospects || prospects.length === 0) {
+      showToast("Aucun prospect à exporter pour le moment.", "warning");
+      return;
+    }
+    const headers = ["Pseudo", "Score", "WhatsApp", "Ajouts Liste", "Reservations", "Demande de Contact"];
+    const rows = prospects.map(p => [
+      p.pseudo,
+      p.score,
+      p.whatsapp || "Non fourni",
+      p.saved_count || 0,
+      p.reserved_count || 0,
+      p.has_requested_contact ? "Oui" : "Non"
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Prospects_Chauds_Live_${selectedAnalyticsLiveId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Export CSV des prospects réussi ! 📤");
+  };
+
+  const handleExportReservations = (productsList: any[]) => {
+    if (!productsList || productsList.length === 0) {
+      showToast("Aucune réservation à exporter pour le moment.", "warning");
+      return;
+    }
+    const headers = ["ID Article", "Nom", "Prix (FCFA)", "Vues", "Intérêts", "Quantité Réservée", "Revenus Générés (FCFA)"];
+    const rows = productsList.map(p => [
+      p.id,
+      p.name,
+      p.price,
+      p.views || 0,
+      p.interests || 0,
+      p.reservations || 0,
+      (p.reservations || 0) * p.price
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Produits_Populaires_Live_${selectedAnalyticsLiveId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Export CSV des réservations réussi ! 📤");
+  };
+
+  useEffect(() => {
+    if (user && route === 'dashboard' && sellerTab === 'analytics') {
+      if (!selectedAnalyticsLiveId && lives.length > 0) {
+        const activeOrLatest = lives.find(l => l.status === 'ACTIVE') || lives[0];
+        setSelectedAnalyticsLiveId(activeOrLatest.id);
+      } else if (selectedAnalyticsLiveId) {
+        fetchActiveLiveAnalytics(selectedAnalyticsLiveId);
+        const interval = setInterval(() => {
+          fetchActiveLiveAnalytics(selectedAnalyticsLiveId);
+        }, 5000); // 5s interval for real-time live streaming metrics update
+        return () => clearInterval(interval);
+      }
+    }
+  }, [sellerTab, selectedAnalyticsLiveId, lives, route, user]);
 
   const fetchAdminData = async () => {
     setDataLoading(true);
@@ -360,6 +503,14 @@ export default function App() {
     return `${cleanDate || ''}T${time || '00:00'}`;
   };
 
+  const formatToLocalDatetime = (dateStr: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+  };
+
   const getLiveFormError = () => {
     if (!liveFormStart || !liveFormEnd) return null;
     const now = new Date();
@@ -466,8 +617,8 @@ export default function App() {
       description: liveFormDesc,
       slug: liveFormSlug,
       image_url: liveFormImg,
-      start_date: liveFormStart,
-      end_date: liveFormEnd,
+      start_date: new Date(liveFormStart).toISOString(),
+      end_date: new Date(liveFormEnd).toISOString(),
       status: liveEditId ? undefined : 'DRAFT', // keep original status on update unless explicitly overridden
       product_ids: liveFormSelectedProducts
     };
@@ -504,8 +655,8 @@ export default function App() {
     setLiveFormImg(live.image_url);
     
     // format dates to fit datetime-local inputs (YYYY-MM-DDTHH:MM)
-    const startDateFormatted = live.start_date ? new Date(live.start_date).toISOString().slice(0, 16) : '';
-    const endDateFormatted = live.end_date ? new Date(live.end_date).toISOString().slice(0, 16) : '';
+    const startDateFormatted = live.start_date ? formatToLocalDatetime(live.start_date) : '';
+    const endDateFormatted = live.end_date ? formatToLocalDatetime(live.end_date) : '';
     setLiveFormStart(startDateFormatted);
     setLiveFormEnd(endDateFormatted);
 
@@ -566,7 +717,10 @@ export default function App() {
       const res = await fetch(`/api/lives/${reactivateLiveId}/reactivate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_date: reactivateStart, end_date: reactivateEnd })
+        body: JSON.stringify({ 
+          start_date: new Date(reactivateStart).toISOString(), 
+          end_date: new Date(reactivateEnd).toISOString() 
+        })
       });
       if (res.ok) {
         showToast("Session live réactivée avec succès ! Les produits ont été associés.");
@@ -825,27 +979,60 @@ export default function App() {
       setShowVisitorJoinModal(true);
       return;
     }
-    if (!visitorWhatsapp) {
-      showToast("WhatsApp requis pour valider votre commande et vous recontacter.", "warning");
-      setShowVisitorJoinModal(true);
-      return;
-    }
+    const quantity = selectedQuantities[productId] || 1;
 
     try {
       const res = await fetch(`/api/lives/public/${liveSlug}/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pseudo: visitorPseudo, whatsapp: visitorWhatsapp, productId })
+        body: JSON.stringify({ 
+          pseudo: visitorPseudo, 
+          whatsapp: visitorWhatsapp || '', 
+          productId,
+          quantity
+        })
       });
       const data = await res.json();
       if (res.ok) {
-        showToast("Félicitations ! Votre réservation est validée et votre pièce est bloquée ! 🎉");
+        showToast(`Félicitations ! Votre réservation de ${quantity} pièce(s) est validée ! 🎉`);
         fetchPublicLive();
       } else {
         showToast(data.error || "Rupture de stock ! Réservation impossible.", "error");
       }
     } catch (e) {
       showToast("Erreur lors de la réservation.", "error");
+    }
+  };
+
+  const handleVisitorContactRequest = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!visitorPseudo) {
+      setShowVisitorJoinModal(true);
+      return;
+    }
+
+    const whatsappToUse = contactWhatsapp || visitorWhatsapp;
+    if (!whatsappToUse) {
+      setShowContactModal(true);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/lives/public/${liveSlug}/contact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pseudo: visitorPseudo, whatsapp: whatsappToUse })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Votre demande de contact a été transmise au vendeur ! 📞");
+        setShowContactModal(false);
+        fetchPublicLive();
+      } else {
+        showToast(data.error || "Erreur de traitement.", "error");
+      }
+    } catch (e) {
+      showToast("Erreur de connexion.", "error");
     }
   };
 
@@ -1278,6 +1465,14 @@ export default function App() {
             >
               <Package className="w-4 h-4" /> Catalogue Produits
             </button>
+            <button 
+              onClick={() => setSellerTab('analytics')}
+              className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                sellerTab === 'analytics' ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" /> Centre de Contrôle & Analytics
+            </button>
           </div>
 
           {/* Tab Contents: LIVES */}
@@ -1470,7 +1665,16 @@ export default function App() {
                                   fetch(`/api/lives/${l.id}/analytics`)
                                     .then(r => r.json())
                                     .then(data => {
-                                      alert(`Rapport en direct - ${l.title}\n\nVisiteurs uniques : ${data.uniqueVisitorsCount || 0}\nRéservations totales : ${data.reservationsCount || 0}\nArticles mis en avant : ${data.interestsCount || 0}\nPré-inscriptions : ${data.preRegistrationsCount || 0}\nVisiteurs pré-live : ${data.visitorsBeforeStartCount || 0}\nTaux conversion pré-inscrit : ${data.preRegistrationConversionRate || 0}%`);
+                                      setSelectedLiveAnalytics({
+                                        ...data,
+                                        title: l.title,
+                                        isArchived: false
+                                      });
+                                      setShowLiveAnalyticsModal(true);
+                                    })
+                                    .catch(err => {
+                                      console.error(err);
+                                      showToast("Erreur lors de la récupération des analytiques.", "error");
                                     });
                                 }}
                                 className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
@@ -1536,7 +1740,16 @@ export default function App() {
                                   fetch(`/api/lives/${l.id}/analytics`)
                                     .then(r => r.json())
                                     .then(data => {
-                                      alert(`Rapport Session Archivée - ${l.title}\n\nVisiteurs uniques : ${data.uniqueVisitorsCount || 0}\nRéservations totales : ${data.reservationsCount || 0}\nArticles mis en avant : ${data.interestsCount || 0}\nPré-inscriptions : ${data.preRegistrationsCount || 0}\nVisiteurs pré-live : ${data.visitorsBeforeStartCount || 0}`);
+                                      setSelectedLiveAnalytics({
+                                        ...data,
+                                        title: l.title,
+                                        isArchived: true
+                                      });
+                                      setShowLiveAnalyticsModal(true);
+                                    })
+                                    .catch(err => {
+                                      console.error(err);
+                                      showToast("Erreur lors de la récupération des analytiques.", "error");
                                     });
                                 }}
                                 className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
@@ -1615,6 +1828,342 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab Contents: CONTROL CENTER & REAL-TIME ANALYTICS */}
+          {sellerTab === 'analytics' && (
+            <div className="space-y-8" id="control-center-view">
+              {/* Header Selector Row */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-5 rounded-2xl border border-slate-850">
+                <div className="space-y-1">
+                  <h3 className="text-md font-bold text-white flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                    Supervision en Direct (SaaS V1)
+                  </h3>
+                  <p className="text-xs text-slate-400">Suivi et transformation d'audience en temps réel pour vos lives TikTok.</p>
+                </div>
+
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <div className="relative flex-1 md:flex-none">
+                    <select
+                      value={selectedAnalyticsLiveId}
+                      onChange={(e) => setSelectedAnalyticsLiveId(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 w-full md:w-64 appearance-none pr-8 cursor-pointer"
+                    >
+                      {lives.map(l => (
+                        <option key={l.id} value={l.id}>
+                          {l.title} ({l.status})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                      ▼
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => fetchActiveLiveAnalytics(selectedAnalyticsLiveId)}
+                    className="p-2.5 bg-slate-850 hover:bg-slate-800 text-indigo-400 rounded-xl transition border border-slate-850 flex items-center justify-center"
+                    title="Rafraîchir"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {lives.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-850 p-12 text-center rounded-2xl space-y-3">
+                  <BarChart3 className="w-12 h-12 text-slate-600 mx-auto" />
+                  <h4 className="text-sm font-bold text-slate-300">Aucune session live enregistrée</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Créez d'abord une session dans l'onglet "Vos Sessions Live" pour lancer votre supervision en direct.
+                  </p>
+                </div>
+              ) : !activeLiveStats ? (
+                <div className="py-20 flex flex-col items-center justify-center space-y-3">
+                  <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+                  <p className="text-xs text-slate-400">Chargement des indicateurs temps réel...</p>
+                </div>
+              ) : (
+                <div className="space-y-8 animate-fade-in">
+                  {/* KPI Cards Row */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Visiteurs uniques</span>
+                        <p className="text-lg font-black text-white">{activeLiveStats.uniqueVisitorsCount || 0}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400">
+                        <Users className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Réservations</span>
+                        <p className="text-lg font-black text-emerald-400">{activeLiveStats.reservationsCount || 0}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400">
+                        <ShoppingCart className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Intérêts (Favoris)</span>
+                        <p className="text-lg font-black text-pink-400">{activeLiveStats.interestsCount || 0}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-pink-500/15 flex items-center justify-center text-pink-400">
+                        <Heart className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-850 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Conversion Pré-inc.</span>
+                        <p className="text-lg font-black text-violet-400">{activeLiveStats.preRegistrationConversionRate || 0}%</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center text-violet-400">
+                        <CheckSquare className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Activity Timeline Chart Row */}
+                  <div className="bg-slate-900 border border-slate-850 rounded-2xl p-6 shadow-xl space-y-6" id="reservation-timeline-chart-card">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-emerald-400" />
+                          Fréquence & Cumul des Réservations
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Suivi dynamique des flux de commandes et de la progression globale sur la durée de la session.
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-1.5 rounded-full bg-indigo-500/30 border border-indigo-500"></span>
+                          <span>Par intervalle</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-1.5 rounded-full bg-emerald-500"></span>
+                          <span>Cumul total</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="h-72 w-full text-xs">
+                      {activeLiveStats.timeline && activeLiveStats.timeline.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={activeLiveStats.timeline}
+                            margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                          >
+                            <defs>
+                              <linearGradient id="colorReservations" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+                            <XAxis 
+                              dataKey="time" 
+                              stroke="#64748b" 
+                              fontSize={10}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <YAxis 
+                              yAxisId="left"
+                              stroke="#64748b" 
+                              fontSize={10}
+                              tickLine={false}
+                              axisLine={false}
+                              allowDecimals={false}
+                            />
+                            <YAxis 
+                              yAxisId="right"
+                              orientation="right"
+                              stroke="#64748b" 
+                              fontSize={10}
+                              tickLine={false}
+                              axisLine={false}
+                              allowDecimals={false}
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: '#0f172a', 
+                                border: '1px solid #1e293b',
+                                borderRadius: '0.75rem',
+                                color: '#f8fafc',
+                                fontSize: '11px',
+                                fontFamily: 'inherit'
+                              }}
+                              cursor={{ stroke: '#334155', strokeWidth: 1 }}
+                            />
+                            <Area 
+                              yAxisId="left"
+                              type="monotone" 
+                              dataKey="reservations" 
+                              name="Réservations (flux)" 
+                              stroke="#6366f1" 
+                              strokeWidth={2}
+                              fillOpacity={1} 
+                              fill="url(#colorReservations)" 
+                            />
+                            <Line 
+                              yAxisId="right"
+                              type="monotone" 
+                              dataKey="cumulativeReservations" 
+                              name="Total cumulé" 
+                              stroke="#10b981" 
+                              strokeWidth={3}
+                              dot={{ r: 4, strokeWidth: 2, fill: '#0f172a' }}
+                              activeDot={{ r: 6, strokeWidth: 2 }}
+                            />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
+                          <Activity className="w-8 h-8 text-slate-600 animate-pulse" />
+                          <span>Aucune donnée temporelle disponible pour cette session.</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Main Grid: Prospects vs Products */}
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    {/* LEFT COLUMN: HOT PROSPECTS */}
+                    <div className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between">
+                      <div className="p-5 border-b border-slate-850 flex justify-between items-center bg-slate-950/40">
+                        <div className="space-y-0.5">
+                          <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <span className="text-rose-500 animate-pulse">🔥</span>
+                            Prospects Chauds (Scoring)
+                          </h4>
+                          <p className="text-[10px] text-slate-400">Triés par engagement thermique.</p>
+                        </div>
+                        <button
+                          onClick={() => handleExportProspects(activeHotProspects)}
+                          className="px-3 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border border-slate-750"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Exporter (CSV)
+                        </button>
+                      </div>
+
+                      <div className="p-5 flex-1 divide-y divide-slate-850/60 max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                        {activeHotProspects.length === 0 ? (
+                          <div className="py-12 text-center text-slate-500 text-xs">
+                            En attente des premières actions de l'audience sur la boutique...
+                          </div>
+                        ) : (
+                          activeHotProspects.map((p, idx) => (
+                            <div key={idx} className="py-4 flex items-center justify-between gap-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-xs font-black text-white">{p.pseudo}</span>
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                                    p.score >= 100 ? 'bg-rose-950 text-rose-400 border border-rose-800/20' :
+                                    p.score >= 40 ? 'bg-amber-950 text-amber-400' :
+                                    'bg-slate-850 text-slate-400'
+                                  }`}>
+                                    Score : {p.score} pt
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-3 text-[10px] text-slate-400">
+                                  {p.whatsapp ? (
+                                    <a
+                                      href={`https://api.whatsapp.com/send?phone=${encodeURIComponent(p.whatsapp)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1"
+                                    >
+                                      WhatsApp : {p.whatsapp} ↗
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-500 italic">Aucun WhatsApp</span>
+                                  )}
+                                  <span>•</span>
+                                  <span>{p.saved_count || 0} listes</span>
+                                  <span>•</span>
+                                  <span>{p.reserved_count || 0} rés.</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                {p.has_requested_contact && (
+                                  <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-900 text-[9px] font-bold">
+                                    Demande contact 📞
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* RIGHT COLUMN: POPULAR PRODUCTS */}
+                    <div className="bg-slate-900 border border-slate-850 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between">
+                      <div className="p-5 border-b border-slate-850 flex justify-between items-center bg-slate-950/40">
+                        <div className="space-y-0.5">
+                          <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <ShoppingCart className="w-4 h-4 text-emerald-400" />
+                            Produits Populaires & Stock
+                          </h4>
+                          <p className="text-[10px] text-slate-400">Rapports de ventes et de conversions de stock.</p>
+                        </div>
+                        <button
+                          onClick={() => handleExportReservations(activePopularProducts)}
+                          className="px-3 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border border-slate-750"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Exporter (CSV)
+                        </button>
+                      </div>
+
+                      <div className="p-5 flex-1 divide-y divide-slate-850/60 max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                        {activePopularProducts.length === 0 ? (
+                          <div className="py-12 text-center text-slate-500 text-xs">
+                            Aucun produit lié à cette session de direct.
+                          </div>
+                        ) : (
+                          activePopularProducts.map((p, idx) => {
+                            const totalRev = (p.reservations || 0) * p.price;
+                            return (
+                              <div key={idx} className="py-4 flex items-center justify-between gap-4">
+                                <div className="space-y-1">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-xs font-bold text-white">{p.name}</span>
+                                    <span className="text-[10px] font-bold text-slate-400">{p.price.toLocaleString('fr-FR')} FCFA</span>
+                                  </div>
+                                  <div className="flex items-center space-x-3 text-[10px] text-slate-400">
+                                    <span className="text-emerald-400 font-bold">Réservé : {p.reservations || 0} p.</span>
+                                    <span>•</span>
+                                    <span>Vues : {p.views || 0}</span>
+                                    <span>•</span>
+                                    <span>Stock : {p.stock}</span>
+                                  </div>
+                                </div>
+
+                                <div className="text-right space-y-0.5">
+                                  <p className="text-xs font-black text-indigo-400">{totalRev.toLocaleString('fr-FR')} FCFA</p>
+                                  <p className="text-[8px] text-slate-500 uppercase font-black">Revenus</p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2054,6 +2603,129 @@ export default function App() {
                   Enregistrer l'article
                 </button>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL ANALYTIQUES DE SESSION */}
+        {showLiveAnalyticsModal && selectedLiveAnalytics && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 max-w-2xl w-full rounded-2xl overflow-hidden shadow-2xl">
+              <div className="bg-slate-950 px-6 py-4 border-b border-slate-850 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-sm font-bold text-white">Rapport d'activité & Analytics</h3>
+                </div>
+                <button 
+                  onClick={() => { setShowLiveAnalyticsModal(false); setSelectedLiveAnalytics(null); }} 
+                  className="text-slate-450 hover:text-white text-xs font-bold transition"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* Session Header Info */}
+                <div className="bg-slate-950/40 border border-slate-800/60 p-4 rounded-xl space-y-1">
+                  <span className="text-[9px] font-extrabold uppercase text-indigo-400 tracking-wider">Session sélectionnée</span>
+                  <h4 className="text-sm font-bold text-white">{selectedLiveAnalytics.title}</h4>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                      selectedLiveAnalytics.isArchived 
+                        ? 'bg-purple-950 text-purple-400 border border-purple-500/20' 
+                        : 'bg-emerald-950 text-emerald-400 border border-emerald-500/20'
+                    }`}>
+                      {selectedLiveAnalytics.isArchived ? 'Session Archivée' : 'Session Active'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Primary Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {/* Visiteurs Uniques */}
+                  <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center text-slate-400">
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Visiteurs Uniques</span>
+                      <Users className="w-4 h-4 text-indigo-400" />
+                    </div>
+                    <p className="text-xl font-black text-white">{selectedLiveAnalytics.uniqueVisitorsCount || 0}</p>
+                    <span className="text-[9px] text-slate-500 block">Sur toute la période du live</span>
+                  </div>
+
+                  {/* Réservations Totales */}
+                  <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center text-slate-400">
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Réservations</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <p className="text-xl font-black text-emerald-400">{selectedLiveAnalytics.reservationsCount || 0}</p>
+                    <span className="text-[9px] text-slate-500 block">Demandes d'achat validées</span>
+                  </div>
+
+                  {/* Articles mis en avant / Intérêts */}
+                  <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl space-y-2 col-span-2 sm:col-span-1">
+                    <div className="flex justify-between items-center text-slate-400">
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Intérêts marqués</span>
+                      <Heart className="w-4 h-4 text-pink-400" />
+                    </div>
+                    <p className="text-xl font-black text-pink-400">{selectedLiveAnalytics.interestsCount || 0}</p>
+                    <span className="text-[9px] text-slate-500 block">Produits mis en favoris</span>
+                  </div>
+                </div>
+
+                {/* Secondary/Pre-live Metrics Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Pré-inscriptions</span>
+                      <p className="text-lg font-black text-white">{selectedLiveAnalytics.preRegistrationsCount || 0}</p>
+                      <span className="text-[9px] text-slate-500 block">Acheteurs inscrits en attente</span>
+                    </div>
+                    <div className="w-10 h-10 bg-violet-500/10 text-violet-400 rounded-lg flex items-center justify-center">
+                      <Users className="w-5 h-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Visiteurs Pré-live</span>
+                      <p className="text-lg font-black text-white">{selectedLiveAnalytics.visitorsBeforeStartCount || 0}</p>
+                      <span className="text-[9px] text-slate-500 block">Visiteurs sur la page d'attente</span>
+                    </div>
+                    <div className="w-10 h-10 bg-amber-500/10 text-amber-400 rounded-lg flex items-center justify-center">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conversion Rate Card */}
+                {!selectedLiveAnalytics.isArchived && (
+                  <div className="bg-indigo-950/20 border border-indigo-900/40 p-4 rounded-xl flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-black text-indigo-400 block tracking-widest">Taux de conversion pré-inscrits</span>
+                      <p className="text-xs text-slate-300">Proportion des pré-inscrits ayant rejoint le live après son lancement.</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-2xl font-black text-white">{selectedLiveAnalytics.preRegistrationConversionRate || 0}%</span>
+                      <div className="w-24 bg-slate-950 rounded-full h-1.5 mt-1 overflow-hidden">
+                        <div 
+                          style={{ width: `${selectedLiveAnalytics.preRegistrationConversionRate || 0}%` }} 
+                          className="bg-indigo-500 h-full"
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-950 px-6 py-4 border-t border-slate-850 flex justify-end">
+                <button 
+                  onClick={() => { setShowLiveAnalyticsModal(false); setSelectedLiveAnalytics(null); }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
+                >
+                  Fermer le rapport
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2972,6 +3644,25 @@ export default function App() {
                   </div>
                 </div>
 
+                {publicLive.status === 'ACTIVE' && (
+                  <div className="bg-indigo-950/20 border border-indigo-500/10 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center space-x-3">
+                      <Phone className="w-5 h-5 text-indigo-400 animate-pulse" />
+                      <div>
+                        <h4 className="text-xs font-bold text-white">Besoin d'aide ou de conseils personnalisés ?</h4>
+                        <p className="text-[11px] text-slate-400">Demandez à être contacté par le vendeur directement sur WhatsApp après le live.</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleVisitorContactRequest()}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-lg"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      Demander à être recontacté
+                    </button>
+                  </div>
+                )}
+
                 {/* SCHEDULED COUNTDOWN AND PRE-REGISTRATION ROW */}
                 {publicLive.status === 'SCHEDULED' && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center bg-slate-900/60 border border-slate-850 rounded-2xl p-6 shadow-lg">
@@ -3033,6 +3724,42 @@ export default function App() {
                             </div>
                             <p className="text-xs text-slate-400 leading-relaxed">{p.description}</p>
                           </div>
+
+                          {/* Quantity Selector - Required by design */}
+                          {publicLive.status === 'ACTIVE' && p.stock > 0 && (
+                            <div className="flex items-center justify-between bg-slate-950 border border-slate-850 p-2 rounded-xl">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Quantité *</span>
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const curr = selectedQuantities[p.id] || 1;
+                                    if (curr > 1) {
+                                      setSelectedQuantities({ ...selectedQuantities, [p.id]: curr - 1 });
+                                    }
+                                  }}
+                                  className="w-7 h-7 bg-slate-850 hover:bg-slate-800 rounded-lg flex items-center justify-center text-xs font-bold text-slate-300 transition"
+                                >
+                                  -
+                                </button>
+                                <span className="text-xs font-bold text-white w-6 text-center">
+                                  {selectedQuantities[p.id] || 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const curr = selectedQuantities[p.id] || 1;
+                                    if (curr < p.stock) {
+                                      setSelectedQuantities({ ...selectedQuantities, [p.id]: curr + 1 });
+                                    }
+                                  }}
+                                  className="w-7 h-7 bg-slate-850 hover:bg-slate-800 rounded-lg flex items-center justify-center text-xs font-bold text-slate-300 transition"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Actions for public buyers */}
                           {publicLive.status === 'ACTIVE' && p.stock > 0 ? (
@@ -3141,16 +3868,15 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase">Numéro WhatsApp * (Requis pour la validation de commande)</label>
+                  <label className="text-[10px] text-slate-400 font-bold uppercase">Numéro WhatsApp (Optionnel mais recommandé)</label>
                   <input 
                     type="text" 
-                    required 
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
                     placeholder="ex. +33612345678"
                     value={visitorWhatsapp}
                     onChange={(e) => setVisitorWhatsapp(e.target.value)}
                   />
-                  <span className="text-[9px] text-slate-500 block">Permet au vendeur de valider votre réservation et d'envoyer votre facture après le live.</span>
+                  <span className="text-[9px] text-slate-500 block">Permet au vendeur de vous envoyer votre bon de commande directement après le live.</span>
                 </div>
 
                 <button 
@@ -3159,6 +3885,55 @@ export default function App() {
                 >
                   Déverrouiller l'accès boutique
                 </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* VISITOR CONTACT MODAL */}
+        {showContactModal && route === 'live' && publicLive && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-indigo-500/20 max-w-md w-full rounded-2xl p-8 text-center space-y-6 shadow-2xl">
+              <div className="w-16 h-16 rounded-full bg-indigo-600/10 flex items-center justify-center mx-auto text-indigo-400">
+                <Phone className="w-8 h-8" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-md font-bold text-white">Demande de contact WhatsApp</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Veuillez inscrire votre numéro WhatsApp pour que le vendeur puisse vous recontacter directement après le direct.
+                </p>
+              </div>
+
+              <form onSubmit={handleVisitorContactRequest} className="space-y-4 text-left">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase">Votre numéro WhatsApp *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    placeholder="ex. +33612345678"
+                    value={contactWhatsapp}
+                    onChange={(e) => setContactWhatsapp(e.target.value)}
+                  />
+                  <span className="text-[9px] text-slate-500 block">Requis pour vous recontacter par message sécurisé.</span>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setShowContactModal(false)}
+                    className="flex-1 py-2.5 bg-slate-850 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold transition"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg"
+                  >
+                    Valider ma demande
+                  </button>
+                </div>
               </form>
             </div>
           </div>

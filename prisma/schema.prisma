@@ -11,7 +11,7 @@ datasource db {
 }
 
 // ==========================================
-// 1. User (Admin & Seller Multi-Tenant)
+// 1. User (Vendeurs & Admins)
 // ==========================================
 enum UserRole {
   ADMIN
@@ -44,7 +44,7 @@ model User {
 }
 
 // ==========================================
-// 2. LiveSession Model
+// 2. LiveSession Model (Boutique Éphémère)
 // ==========================================
 enum LiveStatus {
   DRAFT
@@ -71,11 +71,12 @@ model LiveSession {
 
   seller      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   products    LiveProduct[]
-  visitors    VisitorSession[]
-  interests   ProductInterest[]
+  visitors    Visitor[]
+  savedProducts SavedProduct[]
   reservations Reservation[]
   auditLogs   AuditLog[]
   notifications LiveNotification[]
+  contactRequests ContactRequest[]
 
   @@index([slug])
   @@index([userId, status])
@@ -83,7 +84,7 @@ model LiveSession {
 }
 
 // ==========================================
-// 3. Product Model
+// 3. Product Model (Catalogue)
 // ==========================================
 model Product {
   id          String        @id @default(uuid()) @db.Uuid
@@ -99,7 +100,7 @@ model Product {
 
   seller      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   lives       LiveProduct[]
-  interests   ProductInterest[]
+  savedProducts SavedProduct[]
   reservations Reservation[]
 
   @@index([userId])
@@ -123,25 +124,46 @@ model LiveProduct {
 }
 
 // ==========================================
-// 5. VisitorSession Model (For unique visitors counts)
+// 5. Visitor Model (Audience & Hot Prospects)
 // ==========================================
-model VisitorSession {
-  id            String      @id @default(uuid()) @db.Uuid
-  pseudo        String      @db.VarChar(50)
-  whatsapp      String?     @db.VarChar(30)
-  liveSessionId String      @map("live_session_id") @db.Uuid
-  joinedAt      DateTime    @default(now()) @map("joined_at") @db.Timestamptz
+model Visitor {
+  id            String          @id @default(uuid()) @db.Uuid
+  pseudo        String          @db.VarChar(50)
+  whatsapp      String?         @db.VarChar(30)
+  score         Int             @default(1)
+  liveSessionId String          @map("live_session_id") @db.Uuid
+  joinedAt      DateTime        @default(now()) @map("joined_at") @db.Timestamptz
+  lastActiveAt  DateTime        @default(now()) @map("last_active_at") @db.Timestamptz
 
-  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  liveSession   LiveSession     @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  actions       VisitorAction[]
 
   @@index([liveSessionId, pseudo])
-  @@map("visitor_sessions")
+  @@map("visitors")
 }
 
 // ==========================================
-// 6. ProductInterest Model (Likes/Wants)
+// 6. VisitorAction Model (Scoring Triggers)
 // ==========================================
-model ProductInterest {
+model VisitorAction {
+  id            String      @id @default(uuid()) @db.Uuid
+  visitorId     String      @map("visitor_id") @db.Uuid
+  actionType    String      @map("action_type") @db.VarChar(50) // 'visit', 'view_product', 'save_product', 'reservation', 'contact_request'
+  productId     String?     @map("product_id") @db.Uuid
+  details       String?     @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  visitor       Visitor     @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@index([visitorId])
+  @@index([createdAt])
+  @@map("visitor_actions")
+}
+
+// ==========================================
+// 7. SavedProduct Model (❤️ Ajouter à la liste)
+// ==========================================
+model SavedProduct {
   id            String      @id @default(uuid()) @db.Uuid
   visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
   productId     String      @map("product_id") @db.Uuid
@@ -152,11 +174,11 @@ model ProductInterest {
   product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, productId])
-  @@map("product_interests")
+  @@map("saved_products")
 }
 
 // ==========================================
-// 7. Reservation Model
+// 8. Reservation Model (🛒 Réservation)
 // ==========================================
 model Reservation {
   id            String      @id @default(uuid()) @db.Uuid
@@ -171,18 +193,37 @@ model Reservation {
   product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, productId])
+  @@index([createdAt])
   @@map("reservations")
 }
 
 // ==========================================
-// 8. AuditLog Model (Seller & Global Real-time Stats)
+// 9. ContactRequest Model (📞 Être contacté)
 // ==========================================
+model ContactRequest {
+  id            String      @id @default(uuid()) @db.Uuid
+  visitorPseudo String      @map("visitor_pseudo") @db.VarChar(50)
+  whatsapp      String      @db.VarChar(30)
+  liveSessionId String      @map("live_session_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId])
+  @@index([createdAt])
+  @@map("contact_requests")
+}
+
+// ==========================================
+// System-Level and Multi-Tenant Support
+// ==========================================
+
 model AuditLog {
   id            String       @id @default(uuid()) @db.Uuid
   liveSessionId String?      @map("live_session_id") @db.Uuid
   visitorPseudo String?      @map("visitor_pseudo") @db.VarChar(50)
   userId        String?      @map("user_id") @db.Uuid
-  actionType    String       @map("action_type") @db.VarChar(50) // 'join', 'interest', 'reservation', 'connexion_vendeur', etc.
+  actionType    String       @map("action_type") @db.VarChar(50) 
   productName   String?      @map("product_name") @db.VarChar(150)
   details       String?      @db.Text
   createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
@@ -195,9 +236,6 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// ==========================================
-// 9. LiveNotification Model
-// ==========================================
 model LiveNotification {
   id            String      @id @default(uuid()) @db.Uuid
   liveId        String      @map("live_id") @db.Uuid
@@ -211,41 +249,31 @@ model LiveNotification {
   @@map("live_notifications")
 }
 
-// ==========================================
-// 10. AdminNotification Model (SaaS Level)
-// ==========================================
 model AdminNotification {
   id        String   @id @default(uuid()) @db.Uuid
   title     String   @db.VarChar(150)
   message   String   @db.Text
-  type      String   @db.VarChar(50) // 'abuse', 'error', 'system', 'alert', 'stock'
+  type      String   @db.VarChar(50) 
   isRead    Boolean  @default(false) @map("is_read")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("admin_notifications")
 }
 
-// ==========================================
-// 11. SystemAlert Model (Health Monitoring)
-// ==========================================
 model SystemAlert {
   id         String   @id @default(uuid()) @db.Uuid
   title      String   @db.VarChar(150)
   message    String   @db.Text
-  severity   String   @db.VarChar(20) // 'info', 'warning', 'critical'
+  severity   String   @db.VarChar(20) 
   isResolved Boolean  @default(false) @map("is_resolved")
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("system_alerts")
 }
 
-// ==========================================
-// 12. SystemConfig Model (Cross Recommendation settings, etc.)
-// ==========================================
 model SystemConfig {
   key   String @id @db.VarChar(100)
   value String @db.Text
 
   @@map("system_config")
 }
-
