@@ -1,23 +1,7 @@
 // @ts-nocheck
 import type { IncomingMessage, ServerResponse } from 'http';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../../lib/prisma';
 import bcrypt from 'bcryptjs';
-
-interface VercelRequest extends IncomingMessage {
-  query: { [key: string]: string | string[] };
-  cookies: { [key: string]: string };
-  body: any;
-}
-
-interface VercelResponse extends ServerResponse {
-  status: (statusCode: number) => VercelResponse;
-  json: (body: any) => VercelResponse;
-  send: (body: any) => VercelResponse;
-}
-
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
-const prisma = globalForPrisma.prisma || new PrismaClient();
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set CORS headers for security and preflight handling

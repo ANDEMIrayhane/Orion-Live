@@ -118,13 +118,8 @@ if (!dbUrl) {
                 "======================================================================\n");
 }
 
-export const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: dbUrl || "postgresql://dummy:dummy@localhost:5432/dummy",
-    },
-  },
-});
+import dbPrisma from '../lib/prisma';
+export const prisma = dbPrisma;
 
 // Test Neon database connection and apply CHECK constraints
 async function applySqlConstraints() {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Video, Plus, Trash2, Edit, Link as LinkIcon, Check, ExternalLink, 
   Lock, Unlock, ShoppingBag, Users, Heart, AlertCircle, LogOut, 
@@ -115,6 +116,28 @@ export default function App() {
 
   // Input for custom slug entry
   const [slugSearchInput, setSlugSearchInput] = useState('');
+  const [publicLives, setPublicLives] = useState<any[]>([]);
+  const [publicLivesLoading, setPublicLivesLoading] = useState(false);
+
+  useEffect(() => {
+    if (route === 'home') {
+      const fetchPublicLives = async () => {
+        setPublicLivesLoading(true);
+        try {
+          const res = await fetch('/api/public/lives');
+          if (res.ok) {
+            const data = await res.json();
+            setPublicLives(data);
+          }
+        } catch (err) {
+          console.error("Error fetching public lives:", err);
+        } finally {
+          setPublicLivesLoading(false);
+        }
+      };
+      fetchPublicLives();
+    }
+  }, [route]);
 
   // ====================================================================
   // TOAST NOTIFICATION HELPERS
@@ -1112,17 +1135,38 @@ export default function App() {
   // 1. PUBLIC MARKETING HOMEPAGE VIEW
   // ====================================================================
   if (route === 'home') {
+    // Filter active public lives based on search input
+    const filteredLives = slugSearchInput.trim() 
+      ? publicLives.filter(live => 
+          (live.slug && live.slug.toLowerCase().includes(slugSearchInput.trim().toLowerCase())) ||
+          (live.title && live.title.toLowerCase().includes(slugSearchInput.trim().toLowerCase()))
+        )
+      : [];
+
+    // Group lives into counts for display
+    const activeLivesCount = publicLives.filter(l => l.status === 'ACTIVE' || l.status === 'SOLD_OUT').length;
+
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between" id="home-view">
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden" id="home-view">
+        {/* Futuristic Glowing Aura Backgrounds */}
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/10 blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-pink-900/10 blur-[120px] pointer-events-none" />
+        
+        {/* Tech Grid Overlay */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-30 pointer-events-none" />
+
         {/* Navigation */}
         <header className="border-b border-slate-900 px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
           <div className="flex items-center space-x-3">
-            <img 
-              src={orionLogo} 
-              alt="Orion Live Logo" 
-              className="h-9 w-9 rounded-xl border border-slate-800 object-cover shadow-lg" 
-              referrerPolicy="no-referrer"
-            />
+            <div className="relative">
+              <div className="absolute inset-0 bg-indigo-500/30 rounded-xl blur-md animate-pulse" />
+              <img 
+                src={orionLogo} 
+                alt="Orion Live Logo" 
+                className="relative h-9 w-9 rounded-xl border border-indigo-500/30 object-cover shadow-lg" 
+                referrerPolicy="no-referrer"
+              />
+            </div>
             <span className="font-extrabold tracking-tight text-white text-lg">Orion<span className="text-indigo-400 font-medium">.live</span></span>
           </div>
           <div className="flex items-center space-x-3 text-xs">
@@ -1131,7 +1175,7 @@ export default function App() {
                 <span className="text-slate-400 hidden sm:inline">Connecté : <strong className="text-slate-200">{user.name}</strong> ({user.role})</span>
                 <button 
                   onClick={() => navigateTo(user.role === 'ADMIN' ? 'admin' : 'dashboard')}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20"
                 >
                   Mon Espace <ArrowRight className="w-3.5 h-3.5" />
                 </button>
@@ -1143,7 +1187,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => navigateTo('register')}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-bold transition"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-bold transition shadow-lg shadow-indigo-600/20"
                 >
                   Créer un compte
                 </button>
@@ -1153,89 +1197,397 @@ export default function App() {
         </header>
 
         {/* Hero Section */}
-        <main className="max-w-5xl mx-auto px-6 py-16 md:py-24 text-center space-y-12">
-          <div className="inline-flex items-center space-x-2 bg-indigo-950/50 border border-indigo-500/20 px-3 py-1 rounded-full text-[11px] text-indigo-300 font-bold">
-            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+        <main className="max-w-6xl mx-auto px-6 py-12 md:py-20 text-center space-y-12 relative z-10 w-full">
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="inline-flex items-center space-x-2 bg-indigo-950/40 border border-indigo-500/30 px-4 py-1.5 rounded-full text-[11px] text-indigo-300 font-bold shadow-lg shadow-indigo-500/5 backdrop-blur-sm"
+          >
+            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
             <span>SaaS de Live Commerce de Prochaine Génération</span>
+          </motion.div>
+
+          <div className="space-y-6 max-w-4xl mx-auto">
+            <motion.h1 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.7, delay: 0.1 }}
+              className="text-4xl md:text-5xl lg:text-7xl font-black tracking-tight text-white leading-tight"
+            >
+              Transformez vos ventes live en <br/>
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 drop-shadow-[0_2px_10px_rgba(168,85,247,0.15)]">Commandes Réelles</span>.
+            </motion.h1>
+            <motion.p 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.8, delay: 0.2 }}
+              className="text-sm md:text-base text-slate-400 leading-relaxed max-w-2xl mx-auto font-medium"
+            >
+              Orion Live permet aux commerçants de générer des vitrines de vente flash éphémères pour TikTok, Instagram et Facebook. Zéro survente garanti par blocage PostgreSQL et validation instantanée via WhatsApp.
+            </motion.p>
           </div>
 
-          <div className="space-y-6 max-w-3xl mx-auto">
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-white leading-none">
-              Transformez vos ventes en direct en <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-400">commandes réelles</span>.
-            </h1>
-            <p className="text-sm md:text-base text-slate-400 leading-relaxed max-w-2xl mx-auto">
-              Orion Live permet aux créateurs et commerçants de générer des boutiques temporaires ultra-rapides pour leurs streams TikTok, Facebook ou Instagram, d'éviter toute survente et de valider les réservations par WhatsApp.
-            </p>
-          </div>
+          {/* Quick Stats Panel */}
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto text-left"
+          >
+            <div className="bg-slate-900/40 border border-slate-900/80 backdrop-blur-sm p-4 rounded-2xl flex items-center space-x-3.5 shadow-md">
+              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400">
+                <Video className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-extrabold text-white">{publicLives.length}</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Boutiques créées</div>
+              </div>
+            </div>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center max-w-md mx-auto">
+            <div className="bg-slate-900/40 border border-slate-900/80 backdrop-blur-sm p-4 rounded-2xl flex items-center space-x-3.5 shadow-md">
+              <div className="p-2.5 rounded-xl bg-pink-500/10 text-pink-400">
+                <Activity className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="text-lg font-extrabold text-white flex items-center gap-1.5">
+                  {activeLivesCount}
+                  {activeLivesCount > 0 && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping inline-block" />}
+                </div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Sessions Actives</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-900/80 backdrop-blur-sm p-4 rounded-2xl flex items-center space-x-3.5 shadow-md">
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <Package className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-extrabold text-white">PostgreSQL</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Base Transactions</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-900/80 backdrop-blur-sm p-4 rounded-2xl flex items-center space-x-3.5 shadow-md">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <Phone className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-extrabold text-white">WhatsApp</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Validation Commande</div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Action CTA Buttons */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-center max-w-md mx-auto pt-2">
             <button 
               onClick={() => navigateTo('register')}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-extrabold text-sm transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3.5 rounded-xl font-extrabold text-sm transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transform hover:-translate-y-0.5 active:translate-y-0 duration-150"
             >
               Créer mon espace vendeur <ChevronRight className="w-4 h-4" />
             </button>
             <button 
               onClick={() => {
-                const target = prompt("Entrez le slug du live à rejoindre (ex. vente-bijoux) :");
-                if (target) navigateTo(`live/${target}`);
+                const searchEl = document.getElementById('search-input-box');
+                if (searchEl) {
+                  searchEl.scrollIntoView({ behavior: 'smooth' });
+                  const inp = searchEl.querySelector('input');
+                  if (inp) inp.focus();
+                }
               }}
-              className="bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 px-6 py-3 rounded-xl font-bold text-sm transition"
+              className="bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 px-6 py-3.5 rounded-xl font-bold text-sm transition transform hover:-translate-y-0.5 active:translate-y-0 duration-150"
             >
-              Rejoindre un Live acheteur
+              Rechercher une boutique live
             </button>
           </div>
 
-          {/* Quick Slug Directory Search */}
-          <div className="bg-slate-900/60 border border-slate-900 rounded-2xl p-6 max-w-lg mx-auto space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Recherche rapide de boutique live</h3>
+          {/* Corrected & Interactive Search Panel */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="bg-slate-900/80 border border-slate-800/80 backdrop-blur-md rounded-2xl p-6 max-w-xl mx-auto space-y-4 shadow-xl relative"
+            id="search-input-box"
+          >
+            <div className="absolute -top-3 right-5 bg-gradient-to-r from-indigo-600 to-pink-600 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full text-white shadow-md">
+              Moteur temps réel
+            </div>
+            
+            <div className="text-left">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Search className="w-4 h-4 text-indigo-400" />
+                Recherche rapide de boutique live
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-1">Saisissez le slug ou le titre d'une vente en direct pour rejoindre la boutique client instantanément.</p>
+            </div>
+
             <div className="flex gap-2">
-              <input 
-                type="text" 
-                placeholder="ex. vente-bijoux, clearance-printemps"
-                className="flex-1 bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                value={slugSearchInput}
-                onChange={(e) => setSlugSearchInput(e.target.value)}
-              />
+              <div className="relative flex-1">
+                <input 
+                  type="text" 
+                  placeholder="ex. vente-bijoux, clearance-printemps..."
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-3.5 pr-10 py-3 text-xs text-white focus:outline-none transition"
+                  value={slugSearchInput}
+                  onChange={(e) => setSlugSearchInput(e.target.value)}
+                />
+                {slugSearchInput && (
+                  <button 
+                    onClick={() => setSlugSearchInput('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs font-bold"
+                  >
+                    Effacer
+                  </button>
+                )}
+              </div>
               <button 
                 onClick={() => {
-                  if (slugSearchInput.trim()) navigateTo(`live/${slugSearchInput.trim()}`);
+                  if (slugSearchInput.trim()) {
+                    const exactMatch = publicLives.find(l => l.slug.toLowerCase() === slugSearchInput.trim().toLowerCase());
+                    if (exactMatch) {
+                      navigateTo(`live/${exactMatch.slug}`);
+                    } else {
+                      // Attempt slug navigation directly
+                      navigateTo(`live/${slugSearchInput.trim()}`);
+                    }
+                  } else {
+                    showToast("Veuillez saisir un slug ou un nom de boutique à chercher.", "warning");
+                  }
                 }}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md"
               >
-                Visiter
+                <span>Visiter</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* Live Autocomplete Results */}
+            <AnimatePresence>
+              {slugSearchInput.trim() && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden text-left divide-y divide-slate-900 shadow-2xl max-h-60 overflow-y-auto"
+                >
+                  {filteredLives.length > 0 ? (
+                    filteredLives.map((live) => (
+                      <div 
+                        key={live.id}
+                        onClick={() => navigateTo(`live/${live.slug}`)}
+                        className="p-3 hover:bg-slate-900/60 transition cursor-pointer flex justify-between items-center group"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-white group-hover:text-indigo-400 transition">{live.title}</span>
+                            <span className="text-[10px] text-slate-500">({live.slug})</span>
+                          </div>
+                          <div className="flex items-center space-x-2 text-[10px] text-slate-400">
+                            <span className="font-semibold text-slate-300">Vendeur: {live.seller?.name || 'Inconnu'}</span>
+                            <span>•</span>
+                            <span>{live.products?.length || 0} articles</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          {live.status === 'ACTIVE' && (
+                            <span className="bg-red-950 border border-red-800 text-red-400 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />
+                              DIRECT
+                            </span>
+                          )}
+                          {live.status === 'SOLD_OUT' && (
+                            <span className="bg-amber-950 border border-amber-800 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
+                              ÉPUISÉ
+                            </span>
+                          )}
+                          {live.status === 'SCHEDULED' && (
+                            <span className="bg-blue-950 border border-blue-800 text-blue-400 text-[9px] font-black px-2 py-0.5 rounded-full">
+                              PLANIFIÉ
+                            </span>
+                          )}
+                          {live.status === 'ENDED' && (
+                            <span className="bg-slate-900 border border-slate-800 text-slate-400 text-[9px] font-black px-2 py-0.5 rounded-full">
+                              TERMINÉ
+                            </span>
+                          )}
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-white transition transform group-hover:translate-x-0.5" />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-xs text-slate-500 space-y-1">
+                      <p>Aucune boutique active ne correspond exactement.</p>
+                      <button 
+                        onClick={() => navigateTo(`live/${slugSearchInput.trim()}`)}
+                        className="text-indigo-400 hover:underline font-bold text-[11px] block mx-auto mt-2"
+                      >
+                        Rejoindre quand même la boutique "{slugSearchInput.trim()}" →
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+
+          {/* Directory of Active Lives */}
+          <div className="space-y-6 pt-6 text-left">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                  </span>
+                  L'Annuaire des Live Commerce
+                </h2>
+                <p className="text-xs text-slate-400">Découvrez les boutiques créées ou programmées par nos commerçants.</p>
+              </div>
+              <div className="text-xs text-indigo-400 font-bold bg-indigo-950/40 border border-indigo-500/20 px-3 py-1 rounded-xl">
+                {publicLives.length} Boutiques
+              </div>
+            </div>
+
+            {publicLivesLoading ? (
+              <div className="flex items-center justify-center py-12 space-x-2">
+                <RefreshCw className="w-5 h-5 text-indigo-500 animate-spin" />
+                <span className="text-slate-400 text-xs font-semibold">Mise à jour de l'annuaire...</span>
+              </div>
+            ) : publicLives.length === 0 ? (
+              <div className="bg-slate-900/20 border border-slate-900 rounded-2xl p-8 text-center space-y-4">
+                <p className="text-xs text-slate-500">Aucune boutique n'a été créée pour le moment. Soyez le tout premier vendeur à lancer votre live !</p>
+                <button 
+                  onClick={() => navigateTo('register')}
+                  className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-xl text-xs font-bold transition"
+                >
+                  Lancer mon premier Live en 2 minutes
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {publicLives.map((live, idx) => {
+                  const isLiveActive = live.status === 'ACTIVE' || live.status === 'SOLD_OUT';
+                  return (
+                    <motion.div 
+                      key={live.id}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4, delay: Math.min(idx * 0.05, 0.4) }}
+                      className={`relative bg-slate-900/40 border rounded-2xl overflow-hidden flex flex-col justify-between transition hover:shadow-xl hover:shadow-indigo-950/5 group ${
+                        isLiveActive ? 'border-indigo-500/20 hover:border-indigo-500/40' : 'border-slate-900 hover:border-slate-800'
+                      }`}
+                    >
+                      {/* Top banner / Image placeholder if none provided */}
+                      <div className="h-28 w-full bg-gradient-to-br from-indigo-950/40 to-slate-900 relative flex items-center justify-center border-b border-slate-950">
+                        {live.imageUrl ? (
+                          <img 
+                            src={live.imageUrl} 
+                            alt={live.title} 
+                            className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition duration-300" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-950/30 via-slate-950 to-slate-950 opacity-80" />
+                        )}
+                        
+                        {/* Status label floating */}
+                        <div className="absolute top-3 right-3">
+                          {live.status === 'ACTIVE' && (
+                            <span className="bg-red-600 text-white text-[9px] font-extrabold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md uppercase">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                              En Direct
+                            </span>
+                          )}
+                          {live.status === 'SOLD_OUT' && (
+                            <span className="bg-amber-600 text-white text-[9px] font-extrabold px-2.5 py-1 rounded-full shadow-md uppercase">
+                              Épuisé 🔥
+                            </span>
+                          )}
+                          {live.status === 'SCHEDULED' && (
+                            <span className="bg-blue-600 text-white text-[9px] font-extrabold px-2.5 py-1 rounded-full shadow-md uppercase">
+                              Programmé 📅
+                            </span>
+                          )}
+                          {live.status === 'ENDED' && (
+                            <span className="bg-slate-800 text-slate-300 text-[9px] font-extrabold px-2.5 py-1 rounded-full shadow-md uppercase">
+                              Terminé 🏁
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Title overlay in banner */}
+                        <div className="absolute bottom-3 left-3 right-3 text-left">
+                          <h3 className="text-xs font-black text-white drop-shadow-md truncate">{live.title}</h3>
+                          <p className="text-[10px] text-indigo-300 drop-shadow-sm font-semibold truncate">@{live.slug}</p>
+                        </div>
+                      </div>
+
+                      {/* Content Card Info */}
+                      <div className="p-4 space-y-3.5 flex-1 flex flex-col justify-between bg-slate-950/20">
+                        <p className="text-[11px] text-slate-400 line-clamp-2 h-8 text-left leading-relaxed">
+                          {live.description || "Aucune description fournie pour cette vente flash en direct."}
+                        </p>
+
+                        <div className="flex items-center justify-between border-t border-slate-900/60 pt-3 text-[10px] text-slate-400">
+                          <div>
+                            <span className="font-semibold block text-slate-300 truncate max-w-[130px]">{live.seller?.name || 'Boutique Orion'}</span>
+                            <span className="text-[8px] text-slate-500 uppercase font-bold">Vendeur</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-bold block text-indigo-400">{live.products?.length || 0} Articles</span>
+                            <span className="text-[8px] text-slate-500 uppercase font-bold">Catalogue</span>
+                          </div>
+                        </div>
+
+                        {/* Button Action */}
+                        <button 
+                          onClick={() => navigateTo(`live/${live.slug}`)}
+                          className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 mt-2 ${
+                            isLiveActive 
+                              ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/10' 
+                              : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800'
+                          }`}
+                        >
+                          <span>{isLiveActive ? "Rejoindre le Live" : "Consulter la boutique"}</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Features Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-12">
-            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-16">
+            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3 hover:border-indigo-500/10 transition duration-300">
               <div className="w-10 h-10 rounded-xl bg-indigo-600/15 flex items-center justify-center text-indigo-400">
                 <Clock className="w-5 h-5" />
               </div>
-              <h3 className="text-sm font-bold text-white">Durée Limitée de 24h</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">Les lives s'autodétruisent après 24 heures pour maintenir une urgence d'achat absolue chez vos spectateurs.</p>
+              <h3 className="text-sm font-bold text-white">Durée Éphémère de 24h</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">Les ventes s'arrêtent automatiquement après 24h pour provoquer une urgence absolue et déclencher l'acte d'achat instantané.</p>
             </div>
-            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3">
+            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3 hover:border-indigo-500/10 transition duration-300">
               <div className="w-10 h-10 rounded-xl bg-indigo-600/15 flex items-center justify-center text-indigo-400">
                 <ShieldCheck className="w-5 h-5" />
               </div>
-              <h3 className="text-sm font-bold text-white">Zéro Survente Garanti</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">Les réservations utilisent des transactions bloquantes en base PostgreSQL pour interdire l'achat de pièces épuisées.</p>
+              <h3 className="text-sm font-bold text-white">Prise de Commande Sécurisée</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">Les réservations en direct s'appuient sur des verrous transactionnels PostgreSQL (Neon) ultra-rapides. Zéro survente.</p>
             </div>
-            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3">
+            <div className="bg-slate-900/40 border border-slate-900 p-6 rounded-2xl text-left space-y-3 hover:border-indigo-500/10 transition duration-300">
               <div className="w-10 h-10 rounded-xl bg-indigo-600/15 flex items-center justify-center text-indigo-400">
                 <Phone className="w-5 h-5" />
               </div>
-              <h3 className="text-sm font-bold text-white">Facturation WhatsApp</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">Récupérez instantanément le WhatsApp de l'acheteur pour lui envoyer son lien de paiement de manière sécurisée.</p>
+              <h3 className="text-sm font-bold text-white">Validation Par WhatsApp</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">Récupérez directement les coordonnées de l'acheteur pour valider sa commande et lui envoyer le lien de paiement en 1-clic.</p>
             </div>
           </div>
         </main>
 
-        <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-500">
-          <p>© 2026 Orion Live SaaS Inc. Tous droits réservés. Connecté à PostgreSQL.</p>
+        <footer className="border-t border-slate-900 py-8 text-center text-xs text-slate-500 relative z-10 bg-slate-950">
+          <p>© 2026 Orion Live SaaS Inc. Tous droits réservés. Connecté à la base de données Neon PostgreSQL.</p>
         </footer>
         {renderToast()}
       </div>

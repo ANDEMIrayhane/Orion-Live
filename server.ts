@@ -24,8 +24,9 @@ declare global {
 const JWT_SECRET = process.env.JWT_SECRET || 'orion-live-secret-jwt-key-2026';
 const PORT = 3000;
 
+const app = express();
+
 async function startServer() {
-  const app = express();
   
   app.use(express.json());
   app.use(cookieParser());
@@ -865,6 +866,39 @@ async function startServer() {
   // ==========================================
   // PUBLIC LIVE VISITOR ENDPOINTS
   // ==========================================
+  app.get('/api/public/lives', async (req: Request, res: Response) => {
+    try {
+      await autoCheckDates();
+      const sessions = await prisma.liveSession.findMany({
+        where: {
+          status: {
+            in: ['ACTIVE', 'SOLD_OUT', 'SCHEDULED', 'ENDED']
+          }
+        },
+        include: {
+          seller: {
+            select: {
+              name: true,
+              email: true
+            }
+          },
+          products: {
+            select: {
+              productId: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
+      return res.json(sessions);
+    } catch (error: any) {
+      console.error("Error fetching public lives:", error);
+      return res.status(500).json({ error: "Erreur lors du chargement des lives publics." });
+    }
+  });
+
   app.get('/api/lives/public/:slug', async (req: Request, res: Response) => {
     const { slug } = req.params;
     try {
@@ -1661,6 +1695,10 @@ async function startServer() {
   });
 }
 
-startServer().catch(err => {
-  console.error("FATAL: Server crashed on start", err);
-});
+if (!process.env.VERCEL) {
+  startServer().catch(err => {
+    console.error("FATAL: Server crashed on start", err);
+  });
+}
+
+export default app;
