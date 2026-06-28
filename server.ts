@@ -1690,15 +1690,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Orion Live application running securely at http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Orion Live application running securely at http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
-if (!process.env.VERCEL) {
-  startServer().catch(err => {
-    console.error("FATAL: Server crashed on start", err);
-  });
-}
+startServer().catch(err => {
+  console.error("FATAL: Server crashed on start", err);
+});
 
 export default app;
