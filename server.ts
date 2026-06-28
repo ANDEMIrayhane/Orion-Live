@@ -1701,4 +1701,5 @@ startServer().catch(err => {
   console.error("FATAL: Server crashed on start", err);
 });
 
+export { app };
 export default app;
