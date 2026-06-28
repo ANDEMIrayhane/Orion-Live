@@ -2,22 +2,6 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/api/auth/login",
-      "destination": "/api/auth/login.ts"
-    },
-    {
-      "source": "/api/auth/register",
-      "destination": "/api/auth/register.ts"
-    },
-    {
-      "source": "/api/auth/me",
-      "destination": "/api/auth/me.ts"
-    },
-    {
-      "source": "/api/auth/logout",
-      "destination": "/api/auth/logout.ts"
-    },
-    {
       "source": "/api/(.*)",
       "destination": "/api/server.ts"
     },

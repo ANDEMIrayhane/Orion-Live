@@ -22,5 +22,12 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "server.ts", "vite.config.ts"]
+  "include": [
+    "src",
+    "api",
+    "lib",
+    "prisma",
+    "server.ts",
+    "vite.config.ts"
+  ]
 }
