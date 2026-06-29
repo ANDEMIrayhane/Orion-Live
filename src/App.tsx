@@ -21,6 +21,7 @@ import {
 } from 'recharts';
 // @ts-ignore
 import orionLogo from './assets/images/orion_logo_1782604032311.jpg';
+import { apiFetch } from './lib/api';
 
 export default function App() {
   // ====================================================================
@@ -124,7 +125,7 @@ export default function App() {
       const fetchPublicLives = async () => {
         setPublicLivesLoading(true);
         try {
-          const res = await fetch('/api/public/lives');
+          const res = await apiFetch('/api/public/lives');
           if (res.ok) {
             const data = await res.json();
             setPublicLives(data);
@@ -203,7 +204,7 @@ export default function App() {
   const checkAuth = async () => {
     setAuthLoading(true);
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
         if (data.authenticated) {
@@ -263,9 +264,9 @@ export default function App() {
     setDataLoading(true);
     try {
       const [livesRes, productsRes, statsRes] = await Promise.all([
-        fetch('/api/lives'),
-        fetch('/api/products'),
-        fetch('/api/seller/stats')
+        apiFetch('/api/lives'),
+        apiFetch('/api/products'),
+        apiFetch('/api/seller/stats')
       ]);
 
       if (livesRes.ok) setLives(await livesRes.json());
@@ -281,9 +282,9 @@ export default function App() {
   const refreshSellerDataSilently = async () => {
     try {
       const [livesRes, productsRes, statsRes] = await Promise.all([
-        fetch('/api/lives'),
-        fetch('/api/products'),
-        fetch('/api/seller/stats')
+        apiFetch('/api/lives'),
+        apiFetch('/api/products'),
+        apiFetch('/api/seller/stats')
       ]);
 
       if (livesRes.ok) {
@@ -307,9 +308,9 @@ export default function App() {
     if (!liveId) return;
     try {
       const [statsRes, prospectsRes, popularRes] = await Promise.all([
-        fetch(`/api/lives/${liveId}/live-dashboard-stats`),
-        fetch(`/api/lives/${liveId}/hot-prospects`),
-        fetch(`/api/lives/${liveId}/popular-products`)
+        apiFetch(`/api/lives/${liveId}/live-dashboard-stats`),
+        apiFetch(`/api/lives/${liveId}/hot-prospects`),
+        apiFetch(`/api/lives/${liveId}/popular-products`)
       ]);
 
       if (statsRes.ok) setActiveLiveStats(await statsRes.json());
@@ -401,14 +402,14 @@ export default function App() {
         monitoringRes,
         auditLogsRes
       ] = await Promise.all([
-        fetch('/api/admin/detailed-stats'),
-        fetch('/api/admin/sellers'),
-        fetch('/api/admin/shops'),
-        fetch('/api/admin/products'),
-        fetch('/api/admin/alerts'),
-        fetch('/api/admin/cross-recommendation'),
-        fetch('/api/admin/live-monitoring'),
-        fetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
+        apiFetch('/api/admin/detailed-stats'),
+        apiFetch('/api/admin/sellers'),
+        apiFetch('/api/admin/shops'),
+        apiFetch('/api/admin/products'),
+        apiFetch('/api/admin/alerts'),
+        apiFetch('/api/admin/cross-recommendation'),
+        apiFetch('/api/admin/live-monitoring'),
+        apiFetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
       ]);
 
       if (detailedStatsRes.ok) setAdminDetailedStats(await detailedStatsRes.json());
@@ -429,7 +430,7 @@ export default function App() {
   // Trigger audit logs refetch when filters change
   useEffect(() => {
     if (user && user.role === 'ADMIN' && route === 'admin') {
-      fetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
+      apiFetch(`/api/admin/audit-logs?sellerId=${auditLogSellerFilter}&actionType=${auditLogActionFilter}`)
         .then(res => res.json())
         .then(data => setAdminAuditLogs(data))
         .catch(err => console.error(err));
@@ -439,7 +440,7 @@ export default function App() {
   const fetchPublicLive = async () => {
     if (!liveSlug) return;
     try {
-      const res = await fetch(`/api/lives/public/${liveSlug}`);
+      const res = await apiFetch(`/api/lives/public/${liveSlug}`);
       if (res.ok) {
         const data = await res.json();
         setPublicLive(data.live);
@@ -459,7 +460,7 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail, password: loginPassword })
@@ -521,7 +522,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -546,7 +547,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
       setUser(null);
       showToast("Vous avez été déconnecté.");
       navigateTo('');
@@ -703,7 +704,7 @@ export default function App() {
       const url = liveEditId ? `/api/lives/${liveEditId}` : '/api/lives';
       const method = liveEditId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyData)
@@ -745,7 +746,7 @@ export default function App() {
   const handleDeleteLive = async (id: string) => {
     if (!confirm("Êtes-vous sûr de vouloir supprimer définitivement cette session live ? Toutes les réservations associées seront effacées.")) return;
     try {
-      const res = await fetch(`/api/lives/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/lives/${id}`, { method: 'DELETE' });
       if (res.ok) {
         showToast("Session live supprimée.");
         fetchSellerData();
@@ -759,7 +760,7 @@ export default function App() {
 
   const handleToggleLiveStatus = async (live: any, newStatus: string) => {
     try {
-      const res = await fetch(`/api/lives/${live.id}`, {
+      const res = await apiFetch(`/api/lives/${live.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
@@ -790,7 +791,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(`/api/lives/${reactivateLiveId}/reactivate`, {
+      const res = await apiFetch(`/api/lives/${reactivateLiveId}/reactivate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -848,7 +849,7 @@ export default function App() {
       const url = productEditId ? `/api/products/${productEditId}` : '/api/products';
       const method = productEditId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyData)
@@ -882,7 +883,7 @@ export default function App() {
   const handleDeleteProduct = async (id: string) => {
     if (!confirm("Supprimer ce produit de votre catalogue ?")) return;
     try {
-      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
       if (res.ok) {
         showToast("Produit supprimé du catalogue.");
         fetchSellerData();
@@ -910,7 +911,7 @@ export default function App() {
   const handleToggleUserRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'ADMIN' ? 'SELLER' : 'ADMIN';
     try {
-      const res = await fetch(`/api/admin/users/${userId}/role`, {
+      const res = await apiFetch(`/api/admin/users/${userId}/role`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole })
@@ -930,7 +931,7 @@ export default function App() {
   const handleDeleteUser = async (userId: string) => {
     if (!confirm("Voulez-vous supprimer définitivement cet utilisateur de la plateforme Orion ? Toutes ses données seront supprimées.")) return;
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
       if (res.ok) {
         showToast("Utilisateur supprimé.");
         fetchAdminData();
@@ -946,7 +947,7 @@ export default function App() {
   const handleToggleSellerStatus = async (sellerId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
     try {
-      const res = await fetch(`/api/admin/sellers/${sellerId}/status`, {
+      const res = await apiFetch(`/api/admin/sellers/${sellerId}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus })
@@ -966,7 +967,7 @@ export default function App() {
   const handleToggleShopStatus = async (shopId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
     try {
-      const res = await fetch(`/api/admin/shops/${shopId}/status`, {
+      const res = await apiFetch(`/api/admin/shops/${shopId}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus })
@@ -985,7 +986,7 @@ export default function App() {
 
   const handleToggleCrossRecommendation = async (enabled: boolean) => {
     try {
-      const res = await fetch('/api/admin/cross-recommendation/toggle', {
+      const res = await apiFetch('/api/admin/cross-recommendation/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
@@ -1011,7 +1012,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`/api/lives/public/${liveSlug}/join`, {
+      const res = await apiFetch(`/api/lives/public/${liveSlug}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pseudo: visitorPseudo, whatsapp: visitorWhatsapp })
@@ -1036,7 +1037,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`/api/lives/public/${liveSlug}/interest`, {
+      const res = await apiFetch(`/api/lives/public/${liveSlug}/interest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pseudo: visitorPseudo, productId })
@@ -1058,7 +1059,7 @@ export default function App() {
     const quantity = selectedQuantities[productId] || 1;
 
     try {
-      const res = await fetch(`/api/lives/public/${liveSlug}/reserve`, {
+      const res = await apiFetch(`/api/lives/public/${liveSlug}/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1094,7 +1095,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(`/api/lives/public/${liveSlug}/contact`, {
+      const res = await apiFetch(`/api/lives/public/${liveSlug}/contact`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pseudo: visitorPseudo, whatsapp: whatsappToUse })

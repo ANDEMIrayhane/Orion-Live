@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import cookieParser from 'cookie-parser';
+import cors from 'cors';
 import { db, dbConnectionError, prisma } from './src/database';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -22,11 +23,20 @@ declare global {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'orion-live-secret-jwt-key-2026';
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const app = express();
 
 async function startServer() {
+  
+  // CORS configuration for Vercel frontend
+  app.use(cors({
+    origin: FRONTEND_URL,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }));
   
   app.use(express.json());
   app.use(cookieParser());
@@ -1690,11 +1700,10 @@ async function startServer() {
     });
   }
 
-  if (!process.env.VERCEL) {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Orion Live application running securely at http://0.0.0.0:${PORT}`);
-    });
-  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Orion Live backend running at http://0.0.0.0:${PORT}`);
+    console.log(`🌐 CORS configured for frontend: ${FRONTEND_URL}`);
+  });
 }
 
 startServer().catch(err => {
